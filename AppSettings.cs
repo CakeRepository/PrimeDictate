@@ -28,6 +28,11 @@ internal sealed class AppSettings
 
     public bool ReturnToStartTargetOnCommit { get; set; }
 
+    public bool PlayAudioCues { get; set; } = true;
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public OverlayMode OverlayMode { get; set; } = OverlayMode.CompactMicrophone;
+
     public bool IsOverlaySticky { get; set; }
 
     public static AppSettings CreateDefaultForFirstRun() => new()
@@ -42,6 +47,8 @@ internal sealed class AppSettings
         AutoCommitSilenceSeconds = 3,
         SendEnterAfterCommit = false,
         ReturnToStartTargetOnCommit = false,
+        PlayAudioCues = true,
+        OverlayMode = OverlayMode.CompactMicrophone,
         IsOverlaySticky = false
     };
 }
@@ -57,6 +64,12 @@ internal enum TranscriptionBackendKind
     Whisper = 0,
     Parakeet = 1,
     Moonshine = 2
+}
+
+internal enum OverlayMode
+{
+    CompactMicrophone = 0,
+    FullPanel = 1
 }
 
 internal sealed class HotkeyGesture

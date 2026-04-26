@@ -36,14 +36,31 @@ function Get-RepoVersion {
     return $pg.Version.Trim()
 }
 
+function Get-MsiCompatibleVersion {
+    param([string] $Version)
+
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        throw "Version is required to compute an MSI-compatible package version."
+    }
+
+    $normalizedVersion = $Version.Trim()
+    $match = [regex]::Match($normalizedVersion, '^(?<core>\d+\.\d+\.\d+)')
+    if (-not $match.Success) {
+        throw "Version '$Version' does not start with a semver core like 1.2.3."
+    }
+
+    return $match.Groups['core'].Value
+}
+
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $publishDir = Join-Path $repoRoot "artifacts\win-x64\publish"
 $onlineProj = Join-Path $repoRoot "installer\wix\online\PrimeDictate.Online.wixproj"
 $outDir = Join-Path $repoRoot "artifacts\installer"
 $version = if ([string]::IsNullOrWhiteSpace($PackageVersion)) { Get-RepoVersion -RepoRoot $repoRoot } else { $PackageVersion }
+$msiVersion = Get-MsiCompatibleVersion -Version $version
 $msbuildProps = @()
-if (-not [string]::IsNullOrWhiteSpace($PackageVersion)) {
-    $msbuildProps += "-p:Version=$PackageVersion"
+if (-not [string]::IsNullOrWhiteSpace($msiVersion)) {
+    $msbuildProps += "-p:Version=$msiVersion"
 }
 if (-not [string]::IsNullOrWhiteSpace($AssemblyVersion)) {
     $msbuildProps += "-p:AssemblyVersion=$AssemblyVersion"
@@ -75,7 +92,8 @@ dotnet build $onlineProj -c Release "-p:PublishDir=$publishDirFull" $msbuildProp
 if ($LASTEXITCODE -ne 0) {
     throw "Online WiX build failed with exit code $LASTEXITCODE"
 }
-$onlineMsi = Join-Path $repoRoot "installer\wix\online\bin\Release\PrimeDictate-$version-Windows-Online.msi"
-Copy-Item -Force $onlineMsi (Join-Path $outDir (Split-Path $onlineMsi -Leaf))
+$builtOnlineMsi = Join-Path $repoRoot "installer\wix\online\bin\Release\PrimeDictate-$msiVersion-Windows-Online.msi"
+$publishedOnlineMsi = Join-Path $outDir "PrimeDictate-$version-Windows-Online.msi"
+Copy-Item -Force $builtOnlineMsi $publishedOnlineMsi
 
 Write-Host "Done. MSIs: $outDir"

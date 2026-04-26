@@ -21,14 +21,14 @@
             MouseLeftButtonDown="OnBorderMouseLeftButtonDown">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="12" />
-                <RowDefinition Height="Auto" />
+                <RowDefinition x:Name="HeaderRow" Height="Auto" />
+                <RowDefinition x:Name="ContentRow" Height="*" />
+                <RowDefinition x:Name="SpacerRow" Height="12" />
+                <RowDefinition x:Name="FooterRow" Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- Header -->
-            <Grid Grid.Row="0" Margin="16,12,16,8">
+            <Grid Name="HeaderPanel" Grid.Row="0" Margin="16,12,16,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -60,14 +60,14 @@
             </Grid>
 
             <!-- Center Content -->
-            <Grid Grid.Row="1" Margin="16,8,16,16">
+            <Grid Name="ContentPanel" Grid.Row="1" Margin="16,8,16,16">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="120" />
-                    <RowDefinition Height="*" />
+                    <RowDefinition x:Name="VisualizationRow" Height="120" />
+                    <RowDefinition x:Name="TranscriptRow" Height="*" />
                 </Grid.RowDefinitions>
 
                 <!-- Visualization -->
-                <Grid Grid.Row="0" VerticalAlignment="Center" HorizontalAlignment="Stretch" ClipToBounds="True" Margin="-16,0,-16,0">
+                <Grid Name="VisualizationPanel" Grid.Row="0" VerticalAlignment="Center" HorizontalAlignment="Stretch" ClipToBounds="True" Margin="-16,0,-16,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
@@ -84,7 +84,7 @@
                     
                     <Grid Grid.ColumnSpan="2" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <!-- Background Glow -->
-                        <Ellipse Width="250" Height="250" Opacity="0.5" IsHitTestVisible="False">
+                        <Ellipse Name="GlowEllipse" Width="250" Height="250" Opacity="0.5" IsHitTestVisible="False">
                             <Ellipse.Fill>
                                 <RadialGradientBrush>
                                     <GradientStop Color="#40007ACC" Offset="0" />
@@ -107,13 +107,31 @@
                         </Ellipse>
                         
                         <!-- Microphone Background -->
-                        <Ellipse Width="80" Height="80" Fill="#1A1F26" Stroke="#007ACC" StrokeThickness="2" />
-                        <TextBlock Text="🎙" FontFamily="Segoe UI Emoji" FontSize="34" Foreground="#007ACC" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,4" />
+                        <Ellipse Name="MicCircle" Width="80" Height="80" Fill="#1A1F26" Stroke="#007ACC" StrokeThickness="2" />
+                        <TextBlock Name="MicGlyph" Text="🎙" FontFamily="Segoe UI Emoji" FontSize="34" Foreground="#007ACC" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,4" />
+                        <Border Name="CompactStatusBadge"
+                                Width="18"
+                                Height="18"
+                                Background="#0D1117"
+                                BorderBrush="#2B3440"
+                                BorderThickness="1"
+                                CornerRadius="9"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Bottom"
+                                Margin="0,0,-4,-2"
+                                Visibility="Collapsed">
+                            <Ellipse Name="CompactStateDot"
+                                     Width="8"
+                                     Height="8"
+                                     Fill="#20A470"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center" />
+                        </Border>
                     </Grid>
                 </Grid>
 
                 <!-- Transcript Card -->
-                <Border Grid.Row="1" Background="White" CornerRadius="8" Padding="16" MinHeight="100">
+                <Border Name="TranscriptCard" Grid.Row="1" Background="White" CornerRadius="8" Padding="16" MinHeight="100">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -133,7 +151,7 @@
             </Grid>
 
             <!-- Footer -->
-            <Grid Grid.Row="3" Margin="16,0,16,16">
+            <Grid Name="FooterPanel" Grid.Row="3" Margin="16,0,16,16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />

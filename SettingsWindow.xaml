@@ -274,6 +274,18 @@
 
                         <StackPanel Margin="0,18,0,0">
                             <TextBlock Text="Live preview and auto-commit" FontWeight="SemiBold" />
+                            <StackPanel Margin="0,6,0,0">
+                                <TextBlock Text="Overlay style" FontWeight="SemiBold" />
+                                <ComboBox Name="OverlayModeComboBox"
+                                          Margin="0,6,0,0">
+                                    <ComboBoxItem Content="Compact microphone in lower-right corner" Tag="Compact" />
+                                    <ComboBoxItem Content="Full transcript panel overlay" Tag="Full" />
+                                </ComboBox>
+                                <TextBlock Margin="0,6,0,0"
+                                           Foreground="#666"
+                                           TextWrapping="Wrap"
+                                           Text="Compact keeps a small ready/listening microphone on screen. Full shows the larger transcript panel while you dictate." />
+                            </StackPanel>
                             <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
                                 <TextBlock VerticalAlignment="Center" Text="Commit after" />
                                 <TextBox Name="AutoCommitSilenceSecondsTextBox"
@@ -288,6 +300,9 @@
                             <CheckBox Name="ReturnToStartTargetCheckBox"
                                       Margin="0,10,0,0"
                                       Content="Return the final transcript to the window that had focus when dictation started." />
+                            <CheckBox Name="PlayAudioCuesCheckBox"
+                                      Margin="0,10,0,0"
+                                      Content="Play PrimeDictate start/stop tones when recording begins and capture ends." />
                             <TextBlock Margin="0,6,0,0"
                                        Foreground="#666"
                                        TextWrapping="Wrap"

@@ -59,6 +59,8 @@ internal partial class SettingsWindow : Window
         this.AutoCommitSilenceSecondsTextBox.Text = settings.AutoCommitSilenceSeconds.ToString(CultureInfo.InvariantCulture);
         this.SendEnterAfterCommitCheckBox.IsChecked = settings.SendEnterAfterCommit;
         this.ReturnToStartTargetCheckBox.IsChecked = settings.ReturnToStartTargetOnCommit;
+        this.PlayAudioCuesCheckBox.IsChecked = settings.PlayAudioCues;
+        this.OverlayModeComboBox.SelectedIndex = settings.OverlayMode == OverlayMode.FullPanel ? 1 : 0;
 
         this.WelcomeTab.Header = isFirstRun ? "Welcome" : "Overview";
         this.HeaderText.Text = isFirstRun ? "PrimeDictate first-run setup" : "PrimeDictate settings";
@@ -1001,6 +1003,7 @@ internal partial class SettingsWindow : Window
         }
 
         var selectedBehavior = ((ComboBoxItem)this.TrayBehaviorComboBox.SelectedItem).Tag?.ToString();
+        var selectedOverlayMode = ((ComboBoxItem)this.OverlayModeComboBox.SelectedItem).Tag?.ToString();
         this.currentHotkey = candidate;
 
         settings = new AppSettings
@@ -1017,6 +1020,10 @@ internal partial class SettingsWindow : Window
             AutoCommitSilenceSeconds = autoCommitSeconds,
             SendEnterAfterCommit = this.SendEnterAfterCommitCheckBox.IsChecked == true,
             ReturnToStartTargetOnCommit = this.ReturnToStartTargetCheckBox.IsChecked == true,
+            PlayAudioCues = this.PlayAudioCuesCheckBox.IsChecked != false,
+            OverlayMode = selectedOverlayMode == "Full"
+                ? OverlayMode.FullPanel
+                : OverlayMode.CompactMicrophone,
             IsOverlaySticky = this.isOverlaySticky
         };
 

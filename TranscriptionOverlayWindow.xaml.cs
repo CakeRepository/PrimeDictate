@@ -11,9 +11,17 @@ namespace PrimeDictate;
 
 internal partial class TranscriptionOverlayWindow : Window
 {
+    private const double FullOverlayWidth = 500;
+    private const double FullOverlayHeight = 400;
+    private const double CompactOverlaySize = 108;
+    private const double FullMicSize = 80;
+    private const double CompactMicSize = 62;
+    private const double FullGlowSize = 250;
+    private const double CompactGlowSize = 150;
     private const int MaxDisplayedTranscriptChars = 900;
     private const int WaveformBarCount = 90;
     private const int ParticleCount = 150;
+    private static readonly SolidColorBrush AccentBrush = CreateFrozenBrush(0, 122, 204);
     private static readonly SolidColorBrush ReadyBrush = CreateFrozenBrush(32, 164, 112);
     private static readonly SolidColorBrush RecordingBrush = CreateFrozenBrush(220, 53, 69);
     
@@ -35,6 +43,8 @@ internal partial class TranscriptionOverlayWindow : Window
     private DateTime startTime;
     private double currentSmoothedRms;
     private double targetRms;
+    private OverlayMode overlayMode = OverlayMode.CompactMicrophone;
+    private SolidColorBrush currentStateBrush = ReadyBrush;
 
     public TranscriptionOverlayWindow()
     {
@@ -48,6 +58,7 @@ internal partial class TranscriptionOverlayWindow : Window
         this.visualizerTimer.Tick += this.OnVisualizerTick;
 
         this.InitializeWaveform();
+        this.SetOverlayMode(OverlayMode.CompactMicrophone);
     }
 
     private void InitializeWaveform()
@@ -149,11 +160,66 @@ internal partial class TranscriptionOverlayWindow : Window
         this.PinButton.IsChecked = isSticky;
     }
 
+    public void SetOverlayMode(OverlayMode overlayMode)
+    {
+        this.overlayMode = overlayMode;
+        bool isCompact = overlayMode == OverlayMode.CompactMicrophone;
+
+        this.HeaderPanel.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
+        this.TranscriptCard.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
+        this.FooterPanel.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
+        this.CompactStatusBadge.Visibility = isCompact ? Visibility.Visible : Visibility.Collapsed;
+        this.LeftWaveform.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
+        this.RightWaveform.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
+        this.ParticleCanvas.Visibility = isCompact ? Visibility.Collapsed : Visibility.Visible;
+
+        this.HeaderRow.Height = isCompact ? new GridLength(0) : GridLength.Auto;
+        this.SpacerRow.Height = isCompact ? new GridLength(0) : new GridLength(12);
+        this.FooterRow.Height = isCompact ? new GridLength(0) : GridLength.Auto;
+        this.TranscriptRow.Height = isCompact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        this.VisualizationRow.Height = isCompact ? new GridLength(1, GridUnitType.Star) : new GridLength(120);
+
+        this.ContentPanel.Margin = isCompact ? new Thickness(10) : new Thickness(16, 8, 16, 16);
+        this.VisualizationPanel.Margin = isCompact ? new Thickness(0) : new Thickness(-16, 0, -16, 0);
+        this.OverlayBorder.CornerRadius = isCompact ? new CornerRadius(28) : new CornerRadius(12);
+        this.ResizeMode = isCompact ? ResizeMode.NoResize : ResizeMode.CanResizeWithGrip;
+
+        if (isCompact)
+        {
+            this.Width = CompactOverlaySize;
+            this.Height = CompactOverlaySize;
+            this.MinWidth = CompactOverlaySize;
+            this.MaxWidth = CompactOverlaySize;
+            this.MinHeight = CompactOverlaySize;
+            this.MaxHeight = CompactOverlaySize;
+        }
+        else
+        {
+            this.Width = FullOverlayWidth;
+            this.Height = FullOverlayHeight;
+            this.MinWidth = 360;
+            this.MaxWidth = double.PositiveInfinity;
+            this.MinHeight = 280;
+            this.MaxHeight = double.PositiveInfinity;
+        }
+
+        this.ConfigureMicVisuals(isCompact);
+        this.ApplyStateBrush();
+
+        if (isCompact)
+        {
+            this.PositionCompactInLowerRight();
+        }
+    }
+
     public void SetReadyState(string backendLabel)
     {
-        this.HeaderText.Text = $"Ready [{backendLabel}]";
-        this.StateDot.Fill = ReadyBrush;
+        var statusText = $"Ready [{backendLabel}]";
+        this.HeaderText.Text = statusText;
+        this.currentStateBrush = ReadyBrush;
+        this.ApplyStateBrush();
         this.TranscriptText.Text = "Waiting for hotkey...";
+        this.ToolTip = statusText;
         this.TimerText.Text = "00:00";
         this.timer.Stop();
         this.visualizerTimer.Stop();
@@ -249,10 +315,12 @@ internal partial class TranscriptionOverlayWindow : Window
 
     public void UpdateTranscript(string transcript, bool isProcessing, string backendLabel)
     {
-        this.HeaderText.Text = isProcessing
+        var statusText = isProcessing
             ? $"Processing [{backendLabel}]"
             : $"Listening [{backendLabel}]";
-        this.StateDot.Fill = isProcessing ? ReadyBrush : RecordingBrush;
+        this.HeaderText.Text = statusText;
+        this.currentStateBrush = isProcessing ? ReadyBrush : RecordingBrush;
+        this.ApplyStateBrush();
         var displayTranscript = transcript.Trim();
         if (displayTranscript.Length > MaxDisplayedTranscriptChars)
         {
@@ -262,7 +330,8 @@ internal partial class TranscriptionOverlayWindow : Window
         this.TranscriptText.Text = string.IsNullOrWhiteSpace(displayTranscript)
             ? $"Listening with {backendLabel}..."
             : displayTranscript;
-            
+        this.ToolTip = statusText;
+             
         if (!isProcessing && !this.timer.IsEnabled)
         {
             this.startTime = DateTime.Now;
@@ -281,6 +350,10 @@ internal partial class TranscriptionOverlayWindow : Window
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
+        if (this.overlayMode == OverlayMode.CompactMicrophone)
+        {
+            this.PositionCompactInLowerRight();
+        }
     }
 
     protected override void OnClosed(EventArgs e)
@@ -302,6 +375,11 @@ internal partial class TranscriptionOverlayWindow : Window
             NativeMethods.WsExNoActivate |
             NativeMethods.WsExToolWindow);
         _ = NativeMethods.SetWindowLongPtr(handle, NativeMethods.GwlExStyle, newStyle);
+
+        if (this.overlayMode == OverlayMode.CompactMicrophone)
+        {
+            this.PositionCompactInLowerRight();
+        }
     }
 
     private void OnTimerTick(object? sender, EventArgs e)
@@ -352,6 +430,55 @@ internal partial class TranscriptionOverlayWindow : Window
         {
             // Ignore clipboard errors
         }
+    }
+
+    private void ConfigureMicVisuals(bool isCompact)
+    {
+        double micSize = isCompact ? CompactMicSize : FullMicSize;
+        double glowSize = isCompact ? CompactGlowSize : FullGlowSize;
+        double glyphFontSize = isCompact ? 28 : 34;
+
+        this.GlowEllipse.Width = glowSize;
+        this.GlowEllipse.Height = glowSize;
+        this.Ring1.Width = micSize;
+        this.Ring1.Height = micSize;
+        this.Ring2.Width = micSize;
+        this.Ring2.Height = micSize;
+        this.Ring1Scale.CenterX = micSize / 2.0;
+        this.Ring1Scale.CenterY = micSize / 2.0;
+        this.Ring2Scale.CenterX = micSize / 2.0;
+        this.Ring2Scale.CenterY = micSize / 2.0;
+        this.MicCircle.Width = micSize;
+        this.MicCircle.Height = micSize;
+        this.MicGlyph.FontSize = glyphFontSize;
+        this.MicGlyph.Margin = isCompact ? new Thickness(0, 0, 0, 2) : new Thickness(0, 0, 0, 4);
+    }
+
+    private void ApplyStateBrush()
+    {
+        this.StateDot.Fill = this.currentStateBrush;
+        this.CompactStateDot.Fill = this.currentStateBrush;
+
+        var micBrush = this.overlayMode == OverlayMode.CompactMicrophone
+            ? this.currentStateBrush
+            : AccentBrush;
+        this.MicCircle.Stroke = micBrush;
+        this.MicGlyph.Foreground = micBrush;
+        this.Ring1.Stroke = micBrush;
+        this.Ring2.Stroke = micBrush;
+    }
+
+    private void PositionCompactInLowerRight()
+    {
+        if (this.overlayMode != OverlayMode.CompactMicrophone)
+        {
+            return;
+        }
+
+        const double margin = 24;
+        var workArea = SystemParameters.WorkArea;
+        this.Left = workArea.Right - this.Width - margin;
+        this.Top = workArea.Bottom - this.Height - margin;
     }
 
     private static SolidColorBrush CreateFrozenBrush(byte red, byte green, byte blue)

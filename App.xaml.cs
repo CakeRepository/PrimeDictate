@@ -16,6 +16,7 @@ public partial class App : System.Windows.Application
     private readonly Icon trayRecordingIcon = AppIconProvider.CreateTrayIcon(TrayVisualState.Recording);
     private readonly Icon trayProcessingIcon = AppIconProvider.CreateTrayIcon(TrayVisualState.Processing);
     private readonly Icon trayErrorIcon = AppIconProvider.CreateTrayIcon(TrayVisualState.Error);
+    private readonly DictationAudioCuePlayer audioCuePlayer = new();
     private readonly DispatcherTimer errorStateTimer;
     private Forms.NotifyIcon? notifyIcon;
     private DictationController? dictationController;
@@ -251,6 +252,11 @@ public partial class App : System.Windows.Application
 
         if (isRecording)
         {
+            if (this.settings?.PlayAudioCues == true)
+            {
+                this.audioCuePlayer.Play(DictationAudioCueKind.Start);
+            }
+
             PulseMousePointerCueSoon();
         }
     }
@@ -266,6 +272,11 @@ public partial class App : System.Windows.Application
 
         if (isProcessing)
         {
+            if (this.settings?.PlayAudioCues == true)
+            {
+                this.audioCuePlayer.Play(DictationAudioCueKind.Stop);
+            }
+
             PulseMousePointerCueSoon();
         }
     }
@@ -346,14 +357,26 @@ public partial class App : System.Windows.Application
         {
             this.transcriptionOverlayWindow = new TranscriptionOverlayWindow();
             this.transcriptionOverlayWindow.Closed += (_, _) => this.transcriptionOverlayWindow = null;
-            if (this.settings.IsOverlaySticky)
-            {
-                this.transcriptionOverlayWindow.SetSticky(true);
-            }
+            this.transcriptionOverlayWindow.Show();
+        }
+        else if (!this.transcriptionOverlayWindow.IsVisible)
+        {
             this.transcriptionOverlayWindow.Show();
         }
 
+        this.ApplyOverlayPreferences();
         this.UpdateTranscriptionOverlay();
+    }
+
+    private void ApplyOverlayPreferences()
+    {
+        if (this.transcriptionOverlayWindow is null || this.settings is null)
+        {
+            return;
+        }
+
+        this.transcriptionOverlayWindow.SetSticky(this.settings.IsOverlaySticky);
+        this.transcriptionOverlayWindow.SetOverlayMode(this.settings.OverlayMode);
     }
 
     internal void SaveStickyState(bool isSticky)
@@ -372,7 +395,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        if (this.settings?.IsOverlaySticky == true)
+        if (this.ShouldPersistOverlay())
         {
             return;
         }
@@ -388,6 +411,8 @@ public partial class App : System.Windows.Application
         {
             return;
         }
+
+        this.ApplyOverlayPreferences();
 
         if (!this.isRecording && !this.isProcessing)
         {
@@ -432,7 +457,7 @@ public partial class App : System.Windows.Application
         {
             this.workspaceViewModel.MarkThreadCompleted(threadId);
 
-            if (this.settings?.IsOverlaySticky == true)
+            if (this.ShouldPersistOverlay())
             {
                 this.overlayTranscript = string.Empty;
                 this.isProcessing = false;
@@ -506,8 +531,19 @@ public partial class App : System.Windows.Application
 
         this.workspaceViewModel.SetRuntimeStatus(this.GetActiveBackendLabel(), this.GetActiveModelLabel());
         this.UpdateTrayState();
-        this.UpdateTranscriptionOverlay();
+        if (this.ShouldPersistOverlay())
+        {
+            this.ShowTranscriptionOverlay();
+        }
+        else if (this.transcriptionOverlayWindow is not null)
+        {
+            this.UpdateTranscriptionOverlay();
+        }
     }
+
+    private bool ShouldPersistOverlay() =>
+        this.settings is not null &&
+        (this.settings.IsOverlaySticky || this.settings.OverlayMode == OverlayMode.CompactMicrophone);
 
     private string GetActiveBackendLabel() => this.settings?.TranscriptionBackend switch
     {
