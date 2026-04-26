@@ -70,7 +70,11 @@ public partial class App : System.Windows.Application
             this.settings.ReturnToStartTargetOnCommit,
             this.settings.TranscriptionBackend,
             this.settings.SelectedModelId,
-            this.settings.ModelPath);
+            this.settings.ModelPath,
+            this.settings.EnableOllamaPostProcessing,
+            this.settings.OllamaEndpoint,
+            this.settings.OllamaModel,
+            this.settings.OllamaMode);
         this.dictationController.RecordingStateChanged += this.OnRecordingStateChanged;
         this.dictationController.ProcessingStateChanged += this.OnProcessingStateChanged;
         this.dictationController.ThreadStarted += this.OnThreadStarted;
@@ -239,7 +243,11 @@ public partial class App : System.Windows.Application
             newSettings.ReturnToStartTargetOnCommit,
             newSettings.TranscriptionBackend,
             newSettings.SelectedModelId,
-            newSettings.ModelPath);
+            newSettings.ModelPath,
+            newSettings.EnableOllamaPostProcessing,
+            newSettings.OllamaEndpoint,
+            newSettings.OllamaModel,
+            newSettings.OllamaMode);
         this.UpdateTranscriptionOverlay();
     }
 
@@ -533,7 +541,9 @@ public partial class App : System.Windows.Application
             TargetDisplayName: commit.TargetDisplayName,
             Error: commit.Error,
             AudioDurationSeconds: commit.AudioDuration.TotalSeconds,
-            SendEnterAfterCommit: commit.SendEnterAfterCommit);
+            SendEnterAfterCommit: commit.SendEnterAfterCommit,
+            OriginalTranscript: commit.OriginalTranscript,
+            OllamaSystemPrompt: commit.OllamaSystemPrompt);
 
         this.historyStore?.Append(entry);
 

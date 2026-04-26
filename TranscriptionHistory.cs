@@ -22,7 +22,9 @@ internal sealed record TranscriptCommittedEvent(
     string? TargetDisplayName,
     string? Error,
     TimeSpan AudioDuration,
-    bool SendEnterAfterCommit);
+    bool SendEnterAfterCommit,
+    string? OriginalTranscript,
+    string? OllamaSystemPrompt);
 
 internal sealed record TranscriptHistoryEntry(
     Guid Id,
@@ -33,7 +35,9 @@ internal sealed record TranscriptHistoryEntry(
     string? TargetDisplayName,
     string? Error,
     double AudioDurationSeconds,
-    bool SendEnterAfterCommit);
+    bool SendEnterAfterCommit,
+    string? OriginalTranscript,
+    string? OllamaSystemPrompt);
 
 internal enum TranscriptHistoryFilter
 {
@@ -221,3 +225,4 @@ internal sealed class TranscriptionHistoryViewModel : INotifyPropertyChanged
         this.PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }
+

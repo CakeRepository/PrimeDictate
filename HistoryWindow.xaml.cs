@@ -39,6 +39,18 @@ internal partial class HistoryWindow : Window
             sb.AppendLine($"Error: {entry.Error}");
         }
 
+        if (!string.IsNullOrWhiteSpace(entry.OriginalTranscript))
+        {
+            sb.AppendLine();
+            sb.AppendLine("Original Transcript:");
+            sb.AppendLine(entry.OriginalTranscript);
+            sb.AppendLine();
+            sb.AppendLine("Ollama System Prompt:");
+            sb.AppendLine(entry.OllamaSystemPrompt);
+            sb.AppendLine();
+            sb.AppendLine("Final Injected Transcript:");
+        }
+
         sb.AppendLine();
         sb.AppendLine(entry.Transcript);
         System.Windows.Clipboard.SetText(sb.ToString());

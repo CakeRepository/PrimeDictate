@@ -1,4 +1,4 @@
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 using System.Buffers;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -101,6 +101,10 @@ internal sealed class DictationController : IAsyncDisposable
     private Guid? activeThreadId;
     private ForegroundInputTarget? activeInputTarget;
     private int autoCommitRequested;
+    private bool enableOllamaPostProcessing;
+    private string ollamaEndpoint = "http://localhost:11434";
+    private string ollamaModel = "gemma:2b";
+    private OllamaMode ollamaMode = OllamaMode.Default;
 
     public event Action<bool>? RecordingStateChanged;
     public event Action<bool>? ProcessingStateChanged;
@@ -117,12 +121,20 @@ internal sealed class DictationController : IAsyncDisposable
         bool returnToStartTargetOnCommit = false,
         TranscriptionBackendKind transcriptionBackend = TranscriptionBackendKind.Whisper,
         string? selectedModelId = null,
-        string? modelPath = null)
+        string? modelPath = null,
+        bool enableOllamaPostProcessing = false,
+        string ollamaEndpoint = "http://localhost:11434",
+        string ollamaModel = "gemma:2b",
+        OllamaMode ollamaMode = OllamaMode.Default)
     {
         this.exclusiveMicAccessWhileDictating = exclusiveMicAccessWhileDictating;
         this.autoCommitSilenceDelay = NormalizeSilenceDelay(autoCommitSilenceDelay ?? TimeSpan.FromSeconds(3));
         this.sendEnterAfterCommit = sendEnterAfterCommit;
         this.returnToStartTargetOnCommit = returnToStartTargetOnCommit;
+        this.enableOllamaPostProcessing = enableOllamaPostProcessing;
+        this.ollamaEndpoint = ollamaEndpoint;
+        this.ollamaModel = ollamaModel;
+        this.ollamaMode = ollamaMode;
         this.textInjectionPipeline.UpdateConfiguration(transcriptionBackend, selectedModelId, modelPath);
         this.recorder.AudioLevelUpdated += rms => this.AudioLevelUpdated?.Invoke(rms);
     }
@@ -143,7 +155,11 @@ internal sealed class DictationController : IAsyncDisposable
         bool returnToStartTargetOnCommit,
         TranscriptionBackendKind transcriptionBackend,
         string? selectedModelId,
-        string? modelPath)
+        string? modelPath,
+        bool enableOllamaPostProcessing,
+        string ollamaEndpoint,
+        string ollamaModel,
+        OllamaMode ollamaMode)
     {
         lock (this.configSync)
         {
@@ -151,6 +167,10 @@ internal sealed class DictationController : IAsyncDisposable
             this.autoCommitSilenceDelay = NormalizeSilenceDelay(autoCommitSilenceDelay);
             this.sendEnterAfterCommit = sendEnterAfterCommit;
             this.returnToStartTargetOnCommit = returnToStartTargetOnCommit;
+            this.enableOllamaPostProcessing = enableOllamaPostProcessing;
+            this.ollamaEndpoint = ollamaEndpoint;
+            this.ollamaModel = ollamaModel;
+            this.ollamaMode = ollamaMode;
         }
 
         this.textInjectionPipeline.UpdateConfiguration(transcriptionBackend, selectedModelId, modelPath);
@@ -412,6 +432,8 @@ internal sealed class DictationController : IAsyncDisposable
 
         var target = this.activeInputTarget;
         string? finalTranscript = null;
+        string? originalTranscript = null;
+        string? ollamaSystemPrompt = null;
 
         try
         {
@@ -425,6 +447,43 @@ internal sealed class DictationController : IAsyncDisposable
             if (string.IsNullOrWhiteSpace(finalTranscript))
             {
                 return;
+            }
+
+            bool enableOllama;
+            string ollamaUrl;
+            string ollamaMod;
+            OllamaMode ollamaModeSetting;
+            lock (this.configSync)
+            {
+                enableOllama = this.enableOllamaPostProcessing;
+                ollamaUrl = this.ollamaEndpoint;
+                ollamaMod = this.ollamaModel;
+                ollamaModeSetting = this.ollamaMode;
+            }
+
+            if (enableOllama)
+            {
+                originalTranscript = finalTranscript;
+                if (this.activeThreadId is Guid id)
+                {
+                    this.ThreadTranscriptUpdated?.Invoke(id, "[AI is processing transcript...]");
+                }
+                
+                var ollamaResult = await OllamaPostProcessor.ProcessTranscriptAsync(
+                    finalTranscript,
+                    ollamaUrl,
+                    ollamaMod,
+                    ollamaModeSetting,
+                    target,
+                    CancellationToken.None).ConfigureAwait(false);
+
+                finalTranscript = ollamaResult.ProcessedText;
+                ollamaSystemPrompt = ollamaResult.SystemPrompt;
+
+                if (this.activeThreadId is Guid updatedId && !string.IsNullOrWhiteSpace(finalTranscript))
+                {
+                    this.ThreadTranscriptUpdated?.Invoke(updatedId, finalTranscript);
+                }
             }
 
             bool shouldSendEnter;
@@ -448,7 +507,9 @@ internal sealed class DictationController : IAsyncDisposable
                         TranscriptDeliveryStatus.SkippedFocusChanged,
                         target.DisplayName,
                         "Focused window changed before transcript typing.",
-                        sendEnterAfterCommit: false);
+                        sendEnterAfterCommit: false,
+                        originalTranscript: originalTranscript,
+                        ollamaSystemPrompt: ollamaSystemPrompt);
                     return;
                 }
 
@@ -463,7 +524,9 @@ internal sealed class DictationController : IAsyncDisposable
                         TranscriptDeliveryStatus.Injected,
                         target.DisplayName,
                         error: null,
-                        sendEnterAfterCommit: false);
+                        sendEnterAfterCommit: false,
+                        originalTranscript: originalTranscript,
+                        ollamaSystemPrompt: ollamaSystemPrompt);
                     return;
                 }
 
@@ -478,7 +541,9 @@ internal sealed class DictationController : IAsyncDisposable
                         TranscriptDeliveryStatus.SkippedFocusChanged,
                         target.DisplayName,
                         "Focused window changed and PrimeDictate could not restore the original target.",
-                        sendEnterAfterCommit: false);
+                        sendEnterAfterCommit: false,
+                        originalTranscript: originalTranscript,
+                        ollamaSystemPrompt: ollamaSystemPrompt);
                     return;
                 }
 
@@ -502,7 +567,9 @@ internal sealed class DictationController : IAsyncDisposable
                 TranscriptDeliveryStatus.Injected,
                 target?.DisplayName,
                 error: null,
-                sendEnterAfterCommit: shouldSendEnter);
+                sendEnterAfterCommit: shouldSendEnter,
+                originalTranscript: originalTranscript,
+                ollamaSystemPrompt: ollamaSystemPrompt);
         }
         catch (Exception ex)
         {
@@ -517,7 +584,9 @@ internal sealed class DictationController : IAsyncDisposable
                     TargetDisplayName: target?.DisplayName,
                     Error: ex.Message,
                     AudioDuration: audio.Duration,
-                    SendEnterAfterCommit: false));
+                    SendEnterAfterCommit: false,
+                    OriginalTranscript: originalTranscript,
+                    OllamaSystemPrompt: ollamaSystemPrompt));
             }
         }
     }
@@ -528,7 +597,9 @@ internal sealed class DictationController : IAsyncDisposable
         TranscriptDeliveryStatus status,
         string? targetDisplayName,
         string? error,
-        bool sendEnterAfterCommit)
+        bool sendEnterAfterCommit,
+        string? originalTranscript = null,
+        string? ollamaSystemPrompt = null)
     {
         if (this.activeThreadId is not Guid threadId)
         {
@@ -543,7 +614,9 @@ internal sealed class DictationController : IAsyncDisposable
             TargetDisplayName: targetDisplayName,
             Error: error,
             AudioDuration: audioDuration,
-            SendEnterAfterCommit: sendEnterAfterCommit));
+            SendEnterAfterCommit: sendEnterAfterCommit,
+            OriginalTranscript: originalTranscript,
+            OllamaSystemPrompt: ollamaSystemPrompt));
     }
 
     private static TimeSpan NormalizeSilenceDelay(TimeSpan delay)

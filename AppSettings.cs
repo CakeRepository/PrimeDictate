@@ -35,6 +35,15 @@ internal sealed class AppSettings
 
     public bool IsOverlaySticky { get; set; }
 
+    public bool EnableOllamaPostProcessing { get; set; }
+
+    public string OllamaEndpoint { get; set; } = "http://localhost:11434";
+
+    public string OllamaModel { get; set; } = "gemma:2b";
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public OllamaMode OllamaMode { get; set; } = OllamaMode.Default;
+
     public static AppSettings CreateDefaultForFirstRun() => new()
     {
         FirstRunCompleted = false,
@@ -49,7 +58,11 @@ internal sealed class AppSettings
         ReturnToStartTargetOnCommit = false,
         PlayAudioCues = true,
         OverlayMode = OverlayMode.CompactMicrophone,
-        IsOverlaySticky = false
+        IsOverlaySticky = false,
+        EnableOllamaPostProcessing = false,
+        OllamaEndpoint = "http://localhost:11434",
+        OllamaModel = "gemma:2b",
+        OllamaMode = OllamaMode.Default
     };
 }
 
@@ -70,6 +83,17 @@ internal enum OverlayMode
 {
     CompactMicrophone = 0,
     FullPanel = 1
+}
+
+internal enum OllamaMode
+{
+    Default = 0,
+    Prompt = 1,
+    Bug = 2,
+    Update = 3,
+    Communication = 4,
+    Blog = 5,
+    VibeCoding = 6
 }
 
 internal sealed class HotkeyGesture

@@ -106,12 +106,34 @@
                                    Text="{Binding SelectedEntry.Error, TargetNullValue=(none), StringFormat=Error: {0}}" />
                     </StackPanel>
 
-                    <TextBox Grid.Row="2"
-                             IsReadOnly="True"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"
-                             Text="{Binding SelectedEntry.Transcript}" />
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <StackPanel Margin="0,0,0,10">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedEntry.OriginalTranscript}" Value="{x:Null}">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock FontWeight="SemiBold" Text="Original Transcript" Margin="0,0,0,4"/>
+                                <TextBox IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Background="#FAFAFA"
+                                         Text="{Binding SelectedEntry.OriginalTranscript}" />
+                                
+                                <TextBlock FontWeight="SemiBold" Text="Ollama Context (System Prompt)" Margin="0,12,0,4"/>
+                                <TextBox IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Background="#FAFAFA"
+                                         Text="{Binding SelectedEntry.OllamaSystemPrompt}" />
+                                         
+                                <TextBlock FontWeight="SemiBold" Text="Final Injected Transcript" Margin="0,12,0,4"/>
+                            </StackPanel>
+
+                            <TextBox IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60"
+                                     Text="{Binding SelectedEntry.Transcript}" />
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <StackPanel Grid.Row="3"
                                 Margin="0,10,0,0"

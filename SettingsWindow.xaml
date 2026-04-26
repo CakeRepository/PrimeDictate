@@ -309,6 +309,33 @@
                                        Text="When enabled, PrimeDictate first tries a safe direct write back to the original edit control on Windows. If that is not available, it brings the original window back and types there instead of skipping the commit." />
                         </StackPanel>
 
+                        <StackPanel Margin="0,18,0,0">
+                            <TextBlock Text="Ollama AI Post-Processing" FontWeight="SemiBold" />
+                            <CheckBox Name="EnableOllamaCheckBox"
+                                      Margin="0,6,0,0"
+                                      Content="Enable context-aware formatting via local Ollama" />
+                            <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
+                                <TextBlock VerticalAlignment="Center" Text="Endpoint:" Width="60" />
+                                <TextBox Name="OllamaEndpointTextBox" Width="200" VerticalContentAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
+                                <TextBlock VerticalAlignment="Center" Text="Model:" Width="60" />
+                                <TextBox Name="OllamaModelTextBox" Width="120" VerticalContentAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
+                                <TextBlock VerticalAlignment="Center" Text="Mode:" Width="60" />
+                                <ComboBox Name="OllamaModeComboBox" Width="200" VerticalContentAlignment="Center">
+                                    <ComboBoxItem Content="Default (Grammar &amp; Spelling)" Tag="Default" />
+                                    <ComboBoxItem Content="Prompt (AI Prompt Engineer)" Tag="Prompt" />
+                                    <ComboBoxItem Content="Bug Report (QA Engineer)" Tag="Bug" />
+                                    <ComboBoxItem Content="Update (Changelog/Status)" Tag="Update" />
+                                    <ComboBoxItem Content="Communication (Email/Message)" Tag="Communication" />
+                                    <ComboBoxItem Content="Blog (Draft/Post)" Tag="Blog" />
+                                    <ComboBoxItem Content="Vibe Coding (Agent Instructions)" Tag="VibeCoding" />
+                                </ComboBox>
+                            </StackPanel>
+                        </StackPanel>
+
                         <TextBlock Margin="0,18,0,0"
                                     Foreground="#666"
                                     TextWrapping="Wrap"

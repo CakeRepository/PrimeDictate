@@ -61,6 +61,23 @@ internal partial class SettingsWindow : Window
         this.ReturnToStartTargetCheckBox.IsChecked = settings.ReturnToStartTargetOnCommit;
         this.PlayAudioCuesCheckBox.IsChecked = settings.PlayAudioCues;
         this.OverlayModeComboBox.SelectedIndex = settings.OverlayMode == OverlayMode.FullPanel ? 1 : 0;
+        this.EnableOllamaCheckBox.IsChecked = settings.EnableOllamaPostProcessing;
+        this.OllamaEndpointTextBox.Text = settings.OllamaEndpoint;
+        this.OllamaModelTextBox.Text = settings.OllamaModel;
+        
+        for (int i = 0; i < this.OllamaModeComboBox.Items.Count; i++)
+        {
+            if (this.OllamaModeComboBox.Items[i] is ComboBoxItem item &&
+                item.Tag?.ToString() == settings.OllamaMode.ToString())
+            {
+                this.OllamaModeComboBox.SelectedIndex = i;
+                break;
+            }
+        }
+        if (this.OllamaModeComboBox.SelectedIndex == -1)
+        {
+            this.OllamaModeComboBox.SelectedIndex = 0;
+        }
 
         this.WelcomeTab.Header = isFirstRun ? "Welcome" : "Overview";
         this.HeaderText.Text = isFirstRun ? "PrimeDictate first-run setup" : "PrimeDictate settings";
@@ -1006,6 +1023,12 @@ internal partial class SettingsWindow : Window
         var selectedOverlayMode = ((ComboBoxItem)this.OverlayModeComboBox.SelectedItem).Tag?.ToString();
         this.currentHotkey = candidate;
 
+        var selectedOllamaModeStr = ((ComboBoxItem)this.OllamaModeComboBox.SelectedItem)?.Tag?.ToString() ?? "Default";
+        if (!Enum.TryParse<OllamaMode>(selectedOllamaModeStr, out var selectedOllamaMode))
+        {
+            selectedOllamaMode = OllamaMode.Default;
+        }
+
         settings = new AppSettings
         {
             FirstRunCompleted = true,
@@ -1024,7 +1047,11 @@ internal partial class SettingsWindow : Window
             OverlayMode = selectedOverlayMode == "Full"
                 ? OverlayMode.FullPanel
                 : OverlayMode.CompactMicrophone,
-            IsOverlaySticky = this.isOverlaySticky
+            IsOverlaySticky = this.isOverlaySticky,
+            EnableOllamaPostProcessing = this.EnableOllamaCheckBox.IsChecked == true,
+            OllamaEndpoint = this.OllamaEndpointTextBox.Text.Trim(),
+            OllamaModel = this.OllamaModelTextBox.Text.Trim(),
+            OllamaMode = selectedOllamaMode
         };
 
         return true;
