@@ -1,14 +1,25 @@
+<div align="center">
+  <img src="assets/flowdevs_icon.png" alt="FlowDevs Logo" width="300" />
+</div>
+
 # PrimeDictate
 
+![Live Dictation Overlay](assets/overlay_full.png)
+
 A locally hosted, global hotkey dictation utility for fast desktop workflows. It captures the default microphone, shows live local transcription in a small overlay, and types the final transcript into the current application after a silence auto-commit or manual stop using SharpHook (no synthetic paste, no clipboard round-trip on the hot path).
+
+![Workspace Dashboard](assets/workspace.png)
 
 ## Features
 
 - **Global hotkey**: Configurable global toggle (default `Ctrl+Shift+Space`) to start/stop recording.
 - **Tray workspace UI**: Open **Workspace** from the tray icon to browse per-session dictation threads and global runtime logs in a clearer, column-based dashboard layout.
+- **AI Prompt Modes (Ollama Integration)**: Automatically rewrite and format your transcripts using a local Ollama instance. Includes dynamic prompt modes (like Bug, Update, and Blog) and injects the active application's context into the LLM for perfectly formatted output.
 - **Log signal over noise**: Repeated adjacent log entries are collapsed (for example `(... x12)`) and history is capped to keep memory usage predictable.
 - **Live preview overlay**: While recording, the app periodically re-transcribes the growing buffer with the selected local backend and shows the current hypothesis in a non-activating overlay.
 - **Compact mic overlay**: The default overlay mode keeps a small lower-right microphone visible as a ready/listening indicator. Clicking it temporarily expands the larger transcript panel without changing your saved default mode.
+
+![Compact Mic Overlay](assets/overlay_compact.png)
 - **Silence auto-commit**: When speech has stopped for the configured delay (default 3 seconds), PrimeDictate stops capture, runs a final transcription pass, and sends the final text once.
 - **Transcript history**: Every committed transcript is saved to local history so you can review past dictations, recover text sent to the wrong app, and copy transcript text (with or without metadata).
 - **History filters and detail view**: History includes a filter dropdown (**All**, **Injected**, **NotInjected**) plus an expanded detail pane for full transcript and target metadata.
@@ -33,6 +44,8 @@ A locally hosted, global hotkey dictation utility for fast desktop workflows. It
 ## Local transcription backends and model files
 
 PrimeDictate now has a curated backend + model picker during first-run setup and in Settings.
+
+![Model Selection Settings](assets/settings_model.png)
 
 ### Whisper
 
@@ -176,6 +189,9 @@ The app starts in the tray. On first launch, complete setup, then focus another 
 | `PRIME_DICTATE_MODEL` | Absolute path to the active GGML Whisper model file. PrimeDictate sets this process-locally from saved settings only when the Whisper backend is selected. |
 | `WhisperProcessorBuilder` | Language detection and other inference options are set in `WhisperTextInjectionPipeline` (`WithLanguageDetection()`, etc.). |
 | User settings + first-run | Stored at `%LocalAppData%\PrimeDictate\settings.json` with `FirstRunCompleted`, dictation hotkey, selected backend, selected model id, resolved model path, optional exclusive mic capture toggle, overlay style, silence auto-commit delay, return-to-original-target toggle, audio cue toggle, overlay placement, and coding-mode Enter toggle. |
+
+![Dictation Settings](assets/settings_dictation.png)
+
 | Transcript history | Stored at `%LocalAppData%\PrimeDictate\history.json` with timestamp, transcript text, thread id, delivery status, target display name, optional error, and audio duration metadata. |
 
 ## Architecture (high level)
@@ -197,3 +213,13 @@ An earlier design put the transcript on the clipboard, simulated **Paste**, then
 ## License
 
 This repository’s application code is provided as in-repo source; follow the licenses of the dependencies (Whisper.net, NAudio, SharpHook, and the GGML model terms from their respective publishers) when redistributing.
+
+## About FlowDevs & The Author
+
+**PrimeDictate** is built by **Justin Trantham**, Co-Founder and Prime Automator at [FlowDevs](https://flowdevs.io). 
+
+Founded in 2023, FlowDevs bridges the gap between business goals and scalable tech. We stop you from running your company on spreadsheets by building custom internal tools, client portals, and Power Platform solutions that actually scale. We specialize in workflow automation, integrations, and internal apps for Minnesota businesses.
+
+- [Visit FlowDevs.io](https://flowdevs.io)
+- [Meet the Team](https://flowdevs.io/team)
+- [Book a Discovery Call](https://booking.flowdevs.io)
