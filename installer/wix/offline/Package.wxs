@@ -11,6 +11,7 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of PrimeDictate is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)..\assets\License.rtf" />
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch PrimeDictate (Ready=Blue, Recording=Red, Error=Yellow tray status)" />
     <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]PrimeDictate.exe" />
