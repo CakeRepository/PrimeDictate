@@ -9,13 +9,36 @@
         MinHeight="560"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="10" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="320" />
             <ColumnDefinition Width="12" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0"
+        <DockPanel Grid.Row="0" Grid.ColumnSpan="3">
+            <TextBlock DockPanel.Dock="Left"
+                       VerticalAlignment="Center"
+                       FontSize="17"
+                       FontWeight="SemiBold"
+                       Text="PrimeDictate Workspace" />
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Width="88"
+                        Margin="0,0,8,0"
+                        Content="Settings"
+                        Click="OnSettingsClick" />
+                <Button Width="88"
+                        Content="History"
+                        Click="OnHistoryClick" />
+            </StackPanel>
+        </DockPanel>
+
+        <Border Grid.Row="2"
+                Grid.Column="0"
                 BorderBrush="#DDD"
                 BorderThickness="1"
                 CornerRadius="6"
@@ -65,7 +88,8 @@
             </DockPanel>
         </Border>
 
-        <Border Grid.Column="2"
+        <Border Grid.Row="2"
+            Grid.Column="2"
                 BorderBrush="#DDD"
                 BorderThickness="1"
                 CornerRadius="6"

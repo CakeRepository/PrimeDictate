@@ -26,6 +26,7 @@ internal partial class SettingsWindow : Window
         this.ApplyHotkeyToBuilder(this.currentHotkey);
         this.HotkeyValueText.Text = this.currentHotkey.ToString();
         this.HeaderText.Text = isFirstRun ? "PrimeDictate first-run setup" : "PrimeDictate settings";
+        this.HistoryButton.Visibility = isFirstRun ? Visibility.Collapsed : Visibility.Visible;
         this.CancelButton.Visibility = isFirstRun ? Visibility.Collapsed : Visibility.Visible;
         this.TrayBehaviorComboBox.SelectedIndex = settings.TrayClickBehavior == TrayClickBehavior.SingleClickOpensSettings ? 0 : 1;
         this.ModelPathTextBox.Text = settings.ModelPath ?? string.Empty;
@@ -35,6 +36,7 @@ internal partial class SettingsWindow : Window
     }
 
     internal event Action<AppSettings>? SettingsSaved;
+    internal event Action? HistoryRequested;
 
     private void OnCaptureHotkeyClick(object sender, RoutedEventArgs e)
     {
@@ -142,6 +144,11 @@ internal partial class SettingsWindow : Window
         {
             this.ModelPathTextBox.Text = dialog.FileName;
         }
+    }
+
+    private void OnHistoryClick(object sender, RoutedEventArgs e)
+    {
+        this.HistoryRequested?.Invoke();
     }
 
     private void OnHotkeyBuilderChanged(object sender, RoutedEventArgs e)

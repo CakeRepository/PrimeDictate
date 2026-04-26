@@ -1,7 +1,8 @@
+using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
-using NAudio.Wave;
 using SharpHook;
 using SharpHook.Data;
 using Whisper.net;
@@ -83,21 +84,8 @@ internal sealed class WhisperModelSession : IAsyncDisposable
     }
 }
 
-internal static class PcmWav
-{
-    internal static MemoryStream ToWavStream(byte[] pcm, WaveFormat format)
-    {
-        using var pcmStream = new MemoryStream(pcm, writable: false);
-        using var raw = new RawSourceWaveStream(pcmStream, format);
-        var wavStream = new MemoryStream();
-        WaveFileWriter.WriteWavFileToStream(wavStream, raw);
-        wavStream.Position = 0;
-        return wavStream;
-    }
-}
-
 /// <summary>
-/// Transcribes with Whisper, then updates the focused control via libuiohook text simulation (no clipboard).
+/// Transcribes with Whisper, then updates the focused control via final-only Unicode input (no clipboard).
 /// Target injection is intentionally final-only: partial hypotheses are not typed into editors because repeated
 /// correction loops fight autocomplete, caret movement, and slow input targets.
 /// </summary>
@@ -148,6 +136,12 @@ internal sealed class WhisperTextInjectionPipeline
             return;
         }
 
+        if (OperatingSystem.IsWindows())
+        {
+            WindowsUnicodeInput.SendText(target);
+            return;
+        }
+
         var textResult = this.eventSimulator.SimulateTextEntry(target);
         if (textResult != UioHookResult.Success)
         {
@@ -168,18 +162,47 @@ internal sealed class WhisperTextInjectionPipeline
     {
         var modelSession = await this.EnsureSessionAsync().ConfigureAwait(false);
 
-        var format = new WaveFormat(audio.SampleRate, audio.BitsPerSample, audio.Channels);
-        using var wav = PcmWav.ToWavStream(audio.Pcm16KhzMono, format);
+        if (audio.SampleRate != 16_000 || audio.BitsPerSample != 16 || audio.Channels != 1)
+        {
+            throw new InvalidOperationException("Whisper input must be 16 kHz, 16-bit mono PCM.");
+        }
+
+        var sampleCount = audio.Pcm16KhzMono.Length / 2;
+        if (sampleCount == 0)
+        {
+            return string.Empty;
+        }
+
+        var samples = ArrayPool<float>.Shared.Rent(sampleCount);
         var builder = new StringBuilder();
 
-        await foreach (var result in modelSession.Processor
-                           .ProcessAsync(wav, cancellationToken)
-                           .ConfigureAwait(false))
+        try
         {
-            builder.Append(result.Text);
+            CopyPcm16ToFloatSamples(audio.Pcm16KhzMono, samples.AsSpan(0, sampleCount));
+
+            await foreach (var result in modelSession.Processor
+                               .ProcessAsync(new ReadOnlyMemory<float>(samples, 0, sampleCount), cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                builder.Append(result.Text);
+            }
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(samples);
         }
 
         return builder.ToString().Trim();
+    }
+
+    private static void CopyPcm16ToFloatSamples(byte[] pcm16, Span<float> destination)
+    {
+        var pcmBytes = pcm16.AsSpan(0, destination.Length * 2);
+        var samples = MemoryMarshal.Cast<byte, short>(pcmBytes);
+        for (var i = 0; i < samples.Length; i++)
+        {
+            destination[i] = samples[i] / 32768f;
+        }
     }
 
     private async Task<WhisperModelSession> EnsureSessionAsync()

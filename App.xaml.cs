@@ -20,12 +20,15 @@ public partial class App : System.Windows.Application
     private DictationController? dictationController;
     private GlobalHotkeyListener? hotkeyListener;
     private SettingsStore? settingsStore;
+    private TranscriptionHistoryStore? historyStore;
     private AppSettings? settings;
     private Task? hookTask;
     private SettingsWindow? settingsWindow;
     private MainWindow? workspaceWindow;
+    private HistoryWindow? historyWindow;
     private TranscriptionOverlayWindow? transcriptionOverlayWindow;
     private readonly DictationWorkspaceViewModel workspaceViewModel = new();
+    private readonly TranscriptionHistoryViewModel historyViewModel = new();
     private string overlayTranscript = string.Empty;
     private bool isRecording;
     private bool isProcessing;
@@ -46,7 +49,9 @@ public partial class App : System.Windows.Application
 
         this.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         this.settingsStore = new SettingsStore();
+        this.historyStore = new TranscriptionHistoryStore();
         this.settings = this.settingsStore.LoadOrDefault();
+        this.historyViewModel.Load(this.historyStore.Load());
         this.ApplyModelPathOverride(this.settings);
 
         var configured = this.settings.DictationHotkey.IsValid(out _)
@@ -63,6 +68,7 @@ public partial class App : System.Windows.Application
         this.dictationController.ThreadStarted += this.OnThreadStarted;
         this.dictationController.ThreadCompleted += this.OnThreadCompleted;
         this.dictationController.ThreadTranscriptUpdated += this.OnThreadTranscriptUpdated;
+        this.dictationController.TranscriptCommitted += this.OnTranscriptCommitted;
         this.dictationController.AudioLevelUpdated += this.OnAudioLevelUpdated;
         this.hotkeyListener = new GlobalHotkeyListener(this.dictationController.ToggleRecordingAsync, configured);
         this.hookTask = this.hotkeyListener.RunAsync();
@@ -96,6 +102,7 @@ public partial class App : System.Windows.Application
             this.dictationController.ThreadStarted -= this.OnThreadStarted;
             this.dictationController.ThreadCompleted -= this.OnThreadCompleted;
             this.dictationController.ThreadTranscriptUpdated -= this.OnThreadTranscriptUpdated;
+            this.dictationController.TranscriptCommitted -= this.OnTranscriptCommitted;
             this.dictationController.AudioLevelUpdated -= this.OnAudioLevelUpdated;
             await this.dictationController.DisposeAsync().ConfigureAwait(false);
         }
@@ -114,6 +121,12 @@ public partial class App : System.Windows.Application
             this.transcriptionOverlayWindow = null;
         }
 
+        if (this.historyWindow is not null)
+        {
+            this.historyWindow.Close();
+            this.historyWindow = null;
+        }
+
         this.errorStateTimer.Stop();
         this.errorStateTimer.Tick -= this.OnErrorStateTimerTick;
         this.trayReadyIcon.Dispose();
@@ -130,6 +143,7 @@ public partial class App : System.Windows.Application
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("Open Workspace", null, (_, _) => this.ShowWorkspaceWindow());
         menu.Items.Add("Settings", null, (_, _) => this.ShowSettingsWindow(isFirstRun: false));
+        menu.Items.Add("History", null, (_, _) => this.ShowHistoryWindow());
         menu.Items.Add("Exit", null, (_, _) => this.Shutdown());
 
         var icon = new Forms.NotifyIcon
@@ -160,6 +174,8 @@ public partial class App : System.Windows.Application
 
     internal void ShowSettings() => this.ShowSettingsWindow(false);
 
+    internal void ShowHistory() => this.ShowHistoryWindow();
+
     private void ShowSettingsWindow(bool isFirstRun)
     {
         if (this.settings is null)
@@ -176,9 +192,23 @@ public partial class App : System.Windows.Application
         this.settingsWindow = new SettingsWindow(this.settings, isFirstRun);
         this.settingsWindow.Icon = this.CreateWindowIcon();
         this.settingsWindow.SettingsSaved += this.OnSettingsSaved;
-        this.settingsWindow.Closed += (_, _) => this.settingsWindow = null;
+        this.settingsWindow.HistoryRequested += this.OnHistoryRequested;
+        this.settingsWindow.Closed += (_, _) =>
+        {
+            if (this.settingsWindow is not null)
+            {
+                this.settingsWindow.HistoryRequested -= this.OnHistoryRequested;
+            }
+
+            this.settingsWindow = null;
+        };
         this.settingsWindow.Show();
         this.settingsWindow.Activate();
+    }
+
+    private void OnHistoryRequested()
+    {
+        this.ShowHistoryWindow();
     }
 
     private void OnSettingsSaved(AppSettings newSettings)
@@ -276,6 +306,21 @@ public partial class App : System.Windows.Application
         this.workspaceWindow.Closed += (_, _) => this.workspaceWindow = null;
         this.workspaceWindow.Show();
         this.workspaceWindow.Activate();
+    }
+
+    private void ShowHistoryWindow()
+    {
+        if (this.historyWindow is { IsLoaded: true })
+        {
+            this.historyWindow.Activate();
+            return;
+        }
+
+        this.historyWindow = new HistoryWindow(this.historyViewModel);
+        this.historyWindow.Icon = this.CreateWindowIcon();
+        this.historyWindow.Closed += (_, _) => this.historyWindow = null;
+        this.historyWindow.Show();
+        this.historyWindow.Activate();
     }
 
     private void ShowTranscriptionOverlay()
@@ -404,6 +449,27 @@ public partial class App : System.Windows.Application
 
             this.overlayTranscript = transcript;
             this.UpdateTranscriptionOverlay();
+        });
+    }
+
+    private void OnTranscriptCommitted(TranscriptCommittedEvent commit)
+    {
+        var entry = new TranscriptHistoryEntry(
+            Id: Guid.NewGuid(),
+            ThreadId: commit.ThreadId,
+            TimestampUtc: commit.TimestampUtc,
+            Transcript: commit.Transcript,
+            DeliveryStatus: commit.DeliveryStatus,
+            TargetDisplayName: commit.TargetDisplayName,
+            Error: commit.Error,
+            AudioDurationSeconds: commit.AudioDuration.TotalSeconds,
+            SendEnterAfterCommit: commit.SendEnterAfterCommit);
+
+        this.historyStore?.Append(entry);
+
+        this.Dispatcher.Invoke(() =>
+        {
+            this.historyViewModel.Add(entry);
         });
     }
 

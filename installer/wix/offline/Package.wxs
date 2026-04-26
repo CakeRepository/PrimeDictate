@@ -14,8 +14,12 @@
     <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)..\assets\License.rtf" />
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch PrimeDictate (Ready=Blue, Recording=Red, Error=Yellow tray status)" />
-    <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]PrimeDictate.exe" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <CustomAction
+        Id="SetWixShellExecTarget"
+        Property="WixShellExecTarget"
+        Value="[INSTALLFOLDER]PrimeDictate.exe"
+        Execute="immediate" />
     <CustomAction
         Id="LaunchApplication"
         BinaryRef="Wix4UtilCA_X64"
@@ -28,7 +32,15 @@
           Dialog="ExitDialog"
           Control="Finish"
           Event="DoAction"
+          Value="SetWixShellExecTarget"
+          Order="1"
+          Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+      <Publish
+          Dialog="ExitDialog"
+          Control="Finish"
+          Event="DoAction"
           Value="LaunchApplication"
+          Order="2"
           Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
     </UI>
 

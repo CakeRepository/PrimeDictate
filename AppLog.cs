@@ -97,6 +97,7 @@ internal sealed class DictationWorkspaceViewModel : INotifyPropertyChanged
 {
     private const int MaxGlobalEntries = 600;
     private const int MaxThreadEntries = 300;
+    private const int MaxThreads = 100;
 
     private DictationThreadViewModel? selectedThread;
 
@@ -131,6 +132,11 @@ internal sealed class DictationWorkspaceViewModel : INotifyPropertyChanged
     {
         var thread = new DictationThreadViewModel(threadId);
         this.Threads.Insert(0, thread);
+        while (this.Threads.Count > MaxThreads)
+        {
+            this.Threads.RemoveAt(this.Threads.Count - 1);
+        }
+
         this.SelectedThread = thread;
         return thread;
     }

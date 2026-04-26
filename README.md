@@ -9,6 +9,9 @@ A locally hosted, global hotkey dictation utility for fast desktop workflows. It
 - **Log signal over noise**: Repeated adjacent log entries are collapsed (for example `(... x12)`) and history is capped to keep memory usage predictable.
 - **Live preview overlay**: While recording, the app periodically re-transcribes the growing buffer and shows the current hypothesis in a non-activating overlay.
 - **Silence auto-commit**: When speech has stopped for the configured delay (default 3 seconds), PrimeDictate stops capture, runs a final transcription pass, and sends the final text with `SimulateTextEntry`.
+- **Transcript history**: Every committed transcript is saved to local history so you can review past dictations, recover text sent to the wrong app, and copy transcript text (with or without metadata).
+- **History filters and detail view**: History includes a filter dropdown (**All**, **Injected**, **NotInjected**) plus an expanded detail pane for full transcript and target metadata.
+- **History entry points**: Open history from the tray menu, from the settings window, or from the workspace toolbar.
 - **Final-only target typing**: The target editor is not mutated while recording. Live corrections stay in the overlay so code editors and IntelliSense are not fighting backspace/retype updates.
 - **Coding mode**: Optional setting sends an Enter key immediately after a successful transcript commit.
 - **Foreground guard**: The foreground window is captured when recording starts; if focus changes before the transcript is ready, injection is skipped rather than typing into the wrong app.
@@ -124,6 +127,7 @@ The app starts in the tray. On first launch, complete setup, then focus another 
 | `PRIME_DICTATE_MODEL` | Absolute path to the GGML model file, if not using the default `models/ggml-large-v3-turbo.bin` layout. |
 | `WhisperProcessorBuilder` | Language detection and other inference options are set in `WhisperTextInjectionPipeline` (`WithLanguageDetection()`, etc.). |
 | User settings + first-run | Stored at `%LocalAppData%\PrimeDictate\settings.json` with `FirstRunCompleted`, dictation hotkey, tray click behavior, model override, optional exclusive mic capture toggle, silence auto-commit delay, overlay placement, and coding-mode Enter toggle. |
+| Transcript history | Stored at `%LocalAppData%\PrimeDictate\history.json` with timestamp, transcript text, thread id, delivery status, target display name, optional error, and audio duration metadata. |
 
 ## Architecture (high level)
 

@@ -103,19 +103,29 @@
                    TextWrapping="Wrap"
                    Text="Press your hotkey globally to start dictation. Live preview appears in the overlay and commits after silence or when you press the hotkey again." />
 
-        <StackPanel Grid.Row="7"
-                    Margin="0,14,0,0"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right">
-            <Button Name="CancelButton"
-                    Width="92"
-                    Margin="0,0,10,0"
-                    Content="Cancel"
-                    Click="OnCancelClick" />
-            <Button Width="92"
-                    IsDefault="True"
-                    Content="Save"
-                    Click="OnSaveClick" />
-        </StackPanel>
+        <Grid Grid.Row="7" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Button Name="HistoryButton"
+                    Width="120"
+                    Content="View history"
+                    Click="OnHistoryClick" />
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Name="CancelButton"
+                        Width="92"
+                        Margin="0,0,10,0"
+                        Content="Cancel"
+                        Click="OnCancelClick" />
+                <Button Width="92"
+                        IsDefault="True"
+                        Content="Save"
+                        Click="OnSaveClick" />
+            </StackPanel>
+        </Grid>
     </Grid>
 </Window>

@@ -1,0 +1,132 @@
+<Window x:Class="PrimeDictate.HistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:ClassModifier="internal"
+        Title="PrimeDictate History"
+        Width="1000"
+        Height="680"
+        MinWidth="840"
+        MinHeight="520"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock DockPanel.Dock="Left"
+                       VerticalAlignment="Center"
+                       FontSize="16"
+                       FontWeight="SemiBold"
+                       Text="Transcript History" />
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <TextBlock Margin="0,0,8,0"
+                           VerticalAlignment="Center"
+                           Text="Filter" />
+                <ComboBox Width="170"
+                          ItemsSource="{Binding Filters}"
+                          SelectedItem="{Binding SelectedFilter, Mode=TwoWay}" />
+            </StackPanel>
+        </DockPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="340" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    BorderBrush="#DDD"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="8">
+                <ListBox ItemsSource="{Binding Entries}"
+                         SelectedItem="{Binding SelectedEntry, Mode=TwoWay}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,0,0,6"
+                                    Padding="6"
+                                    BorderBrush="#EFEFEF"
+                                    BorderThickness="1"
+                                    CornerRadius="4">
+                                <StackPanel>
+                                    <TextBlock FontWeight="SemiBold"
+                                               Text="{Binding TimestampUtc, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" />
+                                    <TextBlock Margin="0,3,0,0"
+                                               FontSize="12"
+                                               Foreground="#666"
+                                               Text="{Binding DeliveryStatus}" />
+                                    <TextBlock Margin="0,3,0,0"
+                                               FontSize="12"
+                                               Foreground="#333"
+                                               Text="{Binding TargetDisplayName, TargetNullValue=Unknown target}" />
+                                    <TextBlock Margin="0,4,0,0"
+                                               FontSize="12"
+                                               TextTrimming="CharacterEllipsis"
+                                               Text="{Binding Transcript}"
+                                               ToolTip="{Binding Transcript}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+
+            <Border Grid.Column="2"
+                    BorderBrush="#DDD"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock FontSize="16"
+                               FontWeight="SemiBold"
+                               Text="{Binding SelectedEntry.TimestampUtc, TargetNullValue=No history item selected, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" />
+
+                    <StackPanel Grid.Row="1" Margin="0,8,0,10">
+                        <TextBlock Text="{Binding SelectedEntry.ThreadId, StringFormat=Thread: {0}}" />
+                        <TextBlock Margin="0,2,0,0"
+                                   Text="{Binding SelectedEntry.DeliveryStatus, StringFormat=Delivery: {0}}" />
+                        <TextBlock Margin="0,2,0,0"
+                                   Text="{Binding SelectedEntry.TargetDisplayName, TargetNullValue=Target: Unknown, StringFormat=Target: {0}}" />
+                        <TextBlock Margin="0,2,0,0"
+                                   Text="{Binding SelectedEntry.AudioDurationSeconds, StringFormat=Audio: {0:N1}s}" />
+                        <TextBlock Margin="0,2,0,0"
+                                   Text="{Binding SelectedEntry.Error, TargetNullValue=(none), StringFormat=Error: {0}}" />
+                    </StackPanel>
+
+                    <TextBox Grid.Row="2"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Text="{Binding SelectedEntry.Transcript}" />
+
+                    <StackPanel Grid.Row="3"
+                                Margin="0,10,0,0"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right">
+                        <Button Width="132"
+                                Margin="0,0,10,0"
+                                Content="Copy transcript"
+                                Click="OnCopyTranscriptClick" />
+                        <Button Width="150"
+                                Content="Copy with metadata"
+                                Click="OnCopyDetailsClick" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

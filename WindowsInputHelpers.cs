@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using SharpHook;
@@ -70,6 +71,256 @@ internal static class WindowsMousePointerIndicator
     }
 }
 
+internal static class WindowsUnicodeInput
+{
+    private const int InputKeyboard = 1;
+    private const ushort VirtualKeyShift = 0x10;
+    private const ushort VirtualKeyReturn = 0x0D;
+    private const ushort VirtualKeyTab = 0x09;
+    private const int VirtualKeyCapital = 0x14;
+    private const uint KeyEventFKeyUp = 0x0002;
+    private const uint KeyEventFUnicode = 0x0004;
+    private const int ShiftModifier = 1;
+    private const int CtrlModifier = 2;
+    private const int AltModifier = 4;
+    private const int MaxInputEventsPerBatch = 128;
+    private static readonly TimeSpan ModifierReleaseWait = TimeSpan.FromMilliseconds(750);
+
+    public static void SendText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        if (WindowsFocusedTextControl.TryReplaceSelection(text))
+        {
+            AppLog.Info("Text injection used focused edit-control insertion.");
+            return;
+        }
+
+        AppLog.Info("Text injection using keyboard simulation fallback.");
+        WaitForModifierKeysReleased(ModifierReleaseWait);
+
+        var layout = GetForegroundKeyboardLayout();
+        var batch = new List<NativeMethods.Input>(MaxInputEventsPerBatch);
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+            {
+                continue;
+            }
+
+            AddCharacterInput(batch, text[i], layout);
+
+            if (batch.Count >= MaxInputEventsPerBatch)
+            {
+                SendInputBatch(CollectionsMarshal.AsSpan(batch));
+                batch.Clear();
+                Thread.Sleep(1);
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            SendInputBatch(CollectionsMarshal.AsSpan(batch));
+        }
+    }
+
+    private static void AddCharacterInput(List<NativeMethods.Input> inputs, char character, IntPtr layout)
+    {
+        if (character is '\r' or '\n')
+        {
+            AddVirtualKeyStroke(inputs, VirtualKeyReturn, withShift: false);
+            return;
+        }
+
+        if (character == '\t')
+        {
+            AddVirtualKeyStroke(inputs, VirtualKeyTab, withShift: false);
+            return;
+        }
+
+        var translated = NativeMethods.VkKeyScanEx(character, layout);
+        if (translated != -1)
+        {
+            var virtualKey = (ushort)(translated & 0xFF);
+            var modifiers = (translated >> 8) & 0xFF;
+            if ((modifiers & (CtrlModifier | AltModifier)) == 0)
+            {
+                var withShift = (modifiers & ShiftModifier) != 0;
+                if (char.IsLetter(character) && IsCapsLockEnabled())
+                {
+                    withShift = !withShift;
+                }
+
+                AddVirtualKeyStroke(inputs, virtualKey, withShift);
+                return;
+            }
+        }
+
+        inputs.Add(CreateUnicodeInput(character, keyUp: false));
+        inputs.Add(CreateUnicodeInput(character, keyUp: true));
+    }
+
+    private static void AddVirtualKeyStroke(List<NativeMethods.Input> inputs, ushort virtualKey, bool withShift)
+    {
+        if (withShift)
+        {
+            inputs.Add(CreateVirtualKeyInput(VirtualKeyShift, keyUp: false));
+        }
+
+        inputs.Add(CreateVirtualKeyInput(virtualKey, keyUp: false));
+        inputs.Add(CreateVirtualKeyInput(virtualKey, keyUp: true));
+
+        if (withShift)
+        {
+            inputs.Add(CreateVirtualKeyInput(VirtualKeyShift, keyUp: true));
+        }
+    }
+
+    private static void SendInputBatch(ReadOnlySpan<NativeMethods.Input> inputs)
+    {
+        if (inputs.IsEmpty)
+        {
+            return;
+        }
+
+        var inputArray = inputs.ToArray();
+        var sent = NativeMethods.SendInput(
+            (uint)inputArray.Length,
+            inputArray,
+            Marshal.SizeOf<NativeMethods.Input>());
+        if (sent != inputArray.Length)
+        {
+            throw new InvalidOperationException(
+                $"Text injection sent {sent:N0} of {inputArray.Length:N0} input events. Win32 error: {Marshal.GetLastWin32Error()}.");
+        }
+    }
+
+    private static NativeMethods.Input CreateUnicodeInput(char character, bool keyUp) =>
+        new()
+        {
+            Type = InputKeyboard,
+            Union = new NativeMethods.InputUnion
+            {
+                Keyboard = new NativeMethods.KeyboardInput
+                {
+                    Scan = (ushort)character,
+                    Flags = KeyEventFUnicode | (keyUp ? KeyEventFKeyUp : 0)
+                }
+            }
+        };
+
+    private static NativeMethods.Input CreateVirtualKeyInput(ushort virtualKey, bool keyUp) =>
+        new()
+        {
+            Type = InputKeyboard,
+            Union = new NativeMethods.InputUnion
+            {
+                Keyboard = new NativeMethods.KeyboardInput
+                {
+                    VirtualKey = virtualKey,
+                    Flags = keyUp ? KeyEventFKeyUp : 0
+                }
+            }
+        };
+
+    private static void WaitForModifierKeysReleased(TimeSpan maxWait)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < maxWait && IsAnyModifierKeyDown())
+        {
+            Thread.Sleep(10);
+        }
+    }
+
+    private static bool IsAnyModifierKeyDown() =>
+        IsKeyDown(0x10) || // Shift
+        IsKeyDown(0x11) || // Control
+        IsKeyDown(0x12) || // Alt
+        IsKeyDown(0x5B) || // Left Windows
+        IsKeyDown(0x5C);   // Right Windows
+
+    private static bool IsKeyDown(int virtualKey) =>
+        (NativeMethods.GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+
+    private static bool IsCapsLockEnabled() =>
+        (NativeMethods.GetKeyState(VirtualKeyCapital) & 1) != 0;
+
+    private static IntPtr GetForegroundKeyboardLayout()
+    {
+        var foregroundWindow = NativeMethods.GetForegroundWindow();
+        var threadId = foregroundWindow == IntPtr.Zero
+            ? NativeMethods.GetCurrentThreadId()
+            : NativeMethods.GetWindowThreadProcessId(foregroundWindow, out _);
+        return NativeMethods.GetKeyboardLayout(threadId);
+    }
+}
+
+internal static class WindowsFocusedTextControl
+{
+    private const int EmReplaceSel = 0x00C2;
+    private const uint SmtoAbortIfHung = 0x0002;
+    private const uint ReplaceSelectionTimeoutMs = 1_000;
+
+    public static bool TryReplaceSelection(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return true;
+        }
+
+        var foregroundWindow = NativeMethods.GetForegroundWindow();
+        if (foregroundWindow == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var foregroundThreadId = NativeMethods.GetWindowThreadProcessId(foregroundWindow, out _);
+        var guiThreadInfo = new NativeMethods.GuiThreadInfo
+        {
+            Size = Marshal.SizeOf<NativeMethods.GuiThreadInfo>()
+        };
+
+        if (!NativeMethods.GetGUIThreadInfo(foregroundThreadId, ref guiThreadInfo))
+        {
+            return false;
+        }
+
+        var focusedWindow = guiThreadInfo.FocusWindow;
+        if (focusedWindow == IntPtr.Zero || !IsEditLikeWindow(focusedWindow))
+        {
+            return false;
+        }
+
+        var delivered = NativeMethods.SendMessageTimeout(
+            focusedWindow,
+            EmReplaceSel,
+            new IntPtr(1),
+            text,
+            SmtoAbortIfHung,
+            ReplaceSelectionTimeoutMs,
+            out _);
+        return delivered != IntPtr.Zero;
+    }
+
+    private static bool IsEditLikeWindow(IntPtr windowHandle)
+    {
+        var className = GetClassName(windowHandle);
+        return className.Contains("Edit", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetClassName(IntPtr windowHandle)
+    {
+        var className = new StringBuilder(256);
+        return NativeMethods.GetClassName(windowHandle, className, className.Capacity) > 0
+            ? className.ToString()
+            : string.Empty;
+    }
+}
+
 internal static partial class NativeMethods
 {
     internal const int GwlExStyle = -20;
@@ -89,9 +340,44 @@ internal static partial class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern int GetWindowTextLength(IntPtr hWnd);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo guiThreadInfo);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd,
+        int msg,
+        IntPtr wParam,
+        string lParam,
+        uint flags,
+        uint timeout,
+        out IntPtr result);
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref bool pvParam, uint fWinIni);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    internal static extern short GetKeyState(int vKey);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern uint SendInput(uint inputCount, Input[] inputs, int inputSize);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern short VkKeyScanEx(char character, IntPtr keyboardLayout);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetKeyboardLayout(uint threadId);
+
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
 
     internal static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex) =>
         IntPtr.Size == 8
@@ -114,4 +400,76 @@ internal static partial class NativeMethods
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
     private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuiThreadInfo
+    {
+        public int Size;
+        public uint Flags;
+        public IntPtr ActiveWindow;
+        public IntPtr FocusWindow;
+        public IntPtr CaptureWindow;
+        public IntPtr MenuOwnerWindow;
+        public IntPtr MoveSizeWindow;
+        public IntPtr CaretWindow;
+        public Rect CaretRect;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Input
+    {
+        public int Type;
+        public InputUnion Union;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    internal struct InputUnion
+    {
+        [FieldOffset(0)]
+        public MouseInput Mouse;
+
+        [FieldOffset(0)]
+        public KeyboardInput Keyboard;
+
+        [FieldOffset(0)]
+        public HardwareInput Hardware;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MouseInput
+    {
+        public int X;
+        public int Y;
+        public uint MouseData;
+        public uint Flags;
+        public uint Time;
+        public UIntPtr ExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct KeyboardInput
+    {
+        public ushort VirtualKey;
+        public ushort Scan;
+        public uint Flags;
+        public uint Time;
+        public UIntPtr ExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct HardwareInput
+    {
+        public uint Message;
+        public ushort ParamLow;
+        public ushort ParamHigh;
+    }
 }

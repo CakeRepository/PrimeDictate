@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using System.Buffers;
 using System.IO;
+using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using SharpHook;
@@ -80,6 +82,7 @@ internal sealed class DictationController : IAsyncDisposable
 {
     private static readonly TimeSpan LiveTranscribeInterval = TimeSpan.FromMilliseconds(1_500);
     private static readonly TimeSpan LiveMinAudio = TimeSpan.FromSeconds(0.55);
+    private static readonly TimeSpan LivePreviewMaxAudio = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan SilenceProbeInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan RecentSpeechWindow = TimeSpan.FromMilliseconds(450);
     private const double SpeechRmsThreshold = 0.01;
@@ -103,6 +106,7 @@ internal sealed class DictationController : IAsyncDisposable
     public event Action<Guid>? ThreadStarted;
     public event Action<Guid>? ThreadCompleted;
     public event Action<Guid, string>? ThreadTranscriptUpdated;
+    public event Action<TranscriptCommittedEvent>? TranscriptCommitted;
     public event Action<double>? AudioLevelUpdated;
 
     public DictationController(
@@ -180,7 +184,7 @@ internal sealed class DictationController : IAsyncDisposable
 
     private async Task LivePreviewLoopAsync(CancellationToken cancellationToken)
     {
-        var lastTranscribedSnapBytes = 0;
+        long lastTranscribedCapturedBytes = 0;
         var lastSpeechUtc = DateTime.UtcNow;
         var heardSpeech = false;
         var nextTranscribeAfterUtc = DateTime.MinValue;
@@ -196,7 +200,11 @@ internal sealed class DictationController : IAsyncDisposable
                 break;
             }
 
-            if (!this.recorder.TryGetPcm16KhzMonoSnapshot(out var snap) || snap.IsEmpty)
+            if (!this.recorder.TryGetPcm16KhzMonoSnapshot(
+                    out var snap,
+                    out var capturedBytes,
+                    LivePreviewMaxAudio) ||
+                snap.IsEmpty)
             {
                 continue;
             }
@@ -210,7 +218,7 @@ internal sealed class DictationController : IAsyncDisposable
 
             if (heardSpeech &&
                 snap.Duration >= LiveMinAudio &&
-                snap.Pcm16KhzMono.Length != lastTranscribedSnapBytes &&
+                capturedBytes != lastTranscribedCapturedBytes &&
                 nowUtc >= nextTranscribeAfterUtc)
             {
                 nextTranscribeAfterUtc = nowUtc + LiveTranscribeInterval;
@@ -219,7 +227,7 @@ internal sealed class DictationController : IAsyncDisposable
                     var transcript = await this.textInjectionPipeline
                         .TranscribeAsync(snap, cancellationToken, logTranscript: false)
                         .ConfigureAwait(false);
-                    lastTranscribedSnapBytes = snap.Pcm16KhzMono.Length;
+                    lastTranscribedCapturedBytes = capturedBytes;
                     if (this.activeThreadId is Guid threadId && !string.IsNullOrWhiteSpace(transcript))
                     {
                         this.ThreadTranscriptUpdated?.Invoke(threadId, transcript);
@@ -388,9 +396,12 @@ internal sealed class DictationController : IAsyncDisposable
             return;
         }
 
+        var target = this.activeInputTarget;
+        string? finalTranscript = null;
+
         try
         {
-            var finalTranscript = await this.textInjectionPipeline.TranscribeAsync(audio, CancellationToken.None)
+            finalTranscript = await this.textInjectionPipeline.TranscribeAsync(audio, CancellationToken.None)
                 .ConfigureAwait(false);
             if (this.activeThreadId is Guid threadId && !string.IsNullOrWhiteSpace(finalTranscript))
             {
@@ -402,12 +413,18 @@ internal sealed class DictationController : IAsyncDisposable
                 return;
             }
 
-            var target = this.activeInputTarget;
             if (target is not null && !target.IsStillForeground())
             {
                 AppLog.Error(
                     $"Focused window changed before transcript typing; skipped injection for {target.DisplayName}.",
                     this.activeThreadId);
+                this.PublishTranscriptCommit(
+                    finalTranscript,
+                    audio.Duration,
+                    TranscriptDeliveryStatus.SkippedFocusChanged,
+                    target.DisplayName,
+                    "Focused window changed before transcript typing.",
+                    sendEnterAfterCommit: false);
                 return;
             }
 
@@ -425,11 +442,55 @@ internal sealed class DictationController : IAsyncDisposable
                 this.textInjectionPipeline.SendEnterToTarget();
                 AppLog.Info("Enter key sent after transcript commit.", this.activeThreadId);
             }
+
+            this.PublishTranscriptCommit(
+                finalTranscript,
+                audio.Duration,
+                TranscriptDeliveryStatus.Injected,
+                target?.DisplayName,
+                error: null,
+                sendEnterAfterCommit: shouldSendEnter);
         }
         catch (Exception ex)
         {
             AppLog.Error($"Transcription or text injection failed: {ex.Message}", this.activeThreadId);
+            if (this.activeThreadId is Guid threadId && !string.IsNullOrWhiteSpace(finalTranscript))
+            {
+                this.TranscriptCommitted?.Invoke(new TranscriptCommittedEvent(
+                    ThreadId: threadId,
+                    TimestampUtc: DateTime.UtcNow,
+                    Transcript: finalTranscript ?? string.Empty,
+                    DeliveryStatus: TranscriptDeliveryStatus.FailedToInject,
+                    TargetDisplayName: target?.DisplayName,
+                    Error: ex.Message,
+                    AudioDuration: audio.Duration,
+                    SendEnterAfterCommit: false));
+            }
         }
+    }
+
+    private void PublishTranscriptCommit(
+        string transcript,
+        TimeSpan audioDuration,
+        TranscriptDeliveryStatus status,
+        string? targetDisplayName,
+        string? error,
+        bool sendEnterAfterCommit)
+    {
+        if (this.activeThreadId is not Guid threadId)
+        {
+            return;
+        }
+
+        this.TranscriptCommitted?.Invoke(new TranscriptCommittedEvent(
+            ThreadId: threadId,
+            TimestampUtc: DateTime.UtcNow,
+            Transcript: transcript,
+            DeliveryStatus: status,
+            TargetDisplayName: targetDisplayName,
+            Error: error,
+            AudioDuration: audioDuration,
+            SendEnterAfterCommit: sendEnterAfterCommit));
     }
 
     private static TimeSpan NormalizeSilenceDelay(TimeSpan delay)
@@ -454,7 +515,9 @@ internal sealed class DictationController : IAsyncDisposable
             return true;
         }
 
-        var totalSamples = audio.Pcm16KhzMono.Length / 2;
+        var sampleBytes = audio.Pcm16KhzMono.AsSpan(0, audio.Pcm16KhzMono.Length & ~1);
+        var samples = MemoryMarshal.Cast<byte, short>(sampleBytes);
+        var totalSamples = samples.Length;
         var samplesToInspect = Math.Min(
             totalSamples,
             Math.Max(1, (int)(audio.SampleRate * RecentSpeechWindow.TotalSeconds)));
@@ -463,8 +526,7 @@ internal sealed class DictationController : IAsyncDisposable
 
         for (var sample = startSample; sample < totalSamples; sample++)
         {
-            var offset = sample * 2;
-            var value = BitConverter.ToInt16(audio.Pcm16KhzMono, offset);
+            var value = samples[sample];
             sumSquares += (long)value * value;
         }
 
@@ -535,7 +597,10 @@ internal sealed class DefaultMicrophoneRecorder : IDisposable
     /// <summary>
     /// Copies captured audio so far, resampled to 16 kHz mono. Returns false if not recording.
     /// </summary>
-    public bool TryGetPcm16KhzMonoSnapshot([NotNullWhen(true)] out PcmAudioBuffer? snapshot)
+    public bool TryGetPcm16KhzMonoSnapshot(
+        [NotNullWhen(true)] out PcmAudioBuffer? snapshot,
+        out long capturedBytes,
+        TimeSpan? maxDuration = null)
     {
         byte[] rawAudio;
         WaveFormat rawFormat;
@@ -545,10 +610,12 @@ internal sealed class DefaultMicrophoneRecorder : IDisposable
             if (this.capture is null || this.captureBuffer is null || this.captureFormat is null)
             {
                 snapshot = null;
+                capturedBytes = 0;
                 return false;
             }
 
-            rawAudio = this.captureBuffer.ToArray();
+            capturedBytes = this.captureBuffer.Length;
+            rawAudio = CopyCapturedAudio(this.captureBuffer, this.captureFormat, maxDuration);
             rawFormat = this.captureFormat;
         }
 
@@ -576,19 +643,26 @@ internal sealed class DefaultMicrophoneRecorder : IDisposable
             throw new InvalidOperationException("Microphone capture failed.", stopException);
         }
 
-        byte[] rawAudio;
+        MemoryStream rawAudioStream;
+        long rawAudioLength;
         WaveFormat rawFormat;
 
         lock (this.syncRoot)
         {
-            rawAudio = this.captureBuffer?.ToArray() ?? [];
+            rawAudioStream = this.captureBuffer ?? new MemoryStream();
+            rawAudioLength = rawAudioStream.Length;
             rawFormat = this.captureFormat ?? throw new InvalidOperationException("Capture format is unavailable.");
 
+            this.captureBuffer = null;
             this.ResetCaptureState(activeCapture);
         }
 
-        var pcm16KhzMono = ConvertToPcm16KhzMono(rawAudio, rawFormat);
-        return new PcmAudioBuffer(pcm16KhzMono, TargetSampleRate, TargetBitsPerSample, TargetChannels);
+        using (rawAudioStream)
+        {
+            rawAudioStream.Position = 0;
+            var pcm16KhzMono = ConvertToPcm16KhzMono(rawAudioStream, rawAudioLength, rawFormat);
+            return new PcmAudioBuffer(pcm16KhzMono, TargetSampleRate, TargetBitsPerSample, TargetChannels);
+        }
     }
 
     public void Dispose()
@@ -604,6 +678,8 @@ internal sealed class DefaultMicrophoneRecorder : IDisposable
 
     private void OnDataAvailable(object? sender, WaveInEventArgs args)
     {
+        double? rmsToPublish = null;
+
         lock (this.syncRoot)
         {
             this.captureBuffer?.Write(args.Buffer, 0, args.BytesRecorded);
@@ -640,9 +716,14 @@ internal sealed class DefaultMicrophoneRecorder : IDisposable
 
                 if (rms > 0)
                 {
-                    this.AudioLevelUpdated.Invoke(rms);
+                    rmsToPublish = rms;
                 }
             }
+        }
+
+        if (rmsToPublish is double level)
+        {
+            this.AudioLevelUpdated?.Invoke(level);
         }
     }
 
@@ -699,9 +780,52 @@ internal sealed class DefaultMicrophoneRecorder : IDisposable
         }
     }
 
+    private static byte[] CopyCapturedAudio(MemoryStream captureBuffer, WaveFormat rawFormat, TimeSpan? maxDuration)
+    {
+        var length = captureBuffer.Length;
+        if (length <= 0)
+        {
+            return [];
+        }
+
+        var bytesToCopy = length;
+        if (maxDuration is { } duration && duration > TimeSpan.Zero && rawFormat.AverageBytesPerSecond > 0)
+        {
+            bytesToCopy = Math.Min(
+                length,
+                Math.Max(rawFormat.BlockAlign, (long)(rawFormat.AverageBytesPerSecond * duration.TotalSeconds)));
+
+            var blockAlign = Math.Max(1, rawFormat.BlockAlign);
+            bytesToCopy -= bytesToCopy % blockAlign;
+            if (bytesToCopy <= 0)
+            {
+                bytesToCopy = Math.Min(length, blockAlign);
+            }
+        }
+
+        var copyLength = checked((int)bytesToCopy);
+        var start = checked((int)(length - bytesToCopy));
+        var copy = new byte[copyLength];
+        Buffer.BlockCopy(captureBuffer.GetBuffer(), start, copy, 0, copyLength);
+        return copy;
+    }
+
     private static byte[] ConvertToPcm16KhzMono(byte[] rawAudio, WaveFormat rawFormat)
     {
-        if (rawAudio.Length == 0)
+        using var rawStream = new MemoryStream(rawAudio, writable: false);
+        return ConvertToPcm16KhzMono(rawStream, rawAudio.Length, rawFormat, rawAudio);
+    }
+
+    private static byte[] ConvertToPcm16KhzMono(Stream rawStream, long rawLength, WaveFormat rawFormat) =>
+        ConvertToPcm16KhzMono(rawStream, rawLength, rawFormat, existingTargetPcm: null);
+
+    private static byte[] ConvertToPcm16KhzMono(
+        Stream rawStream,
+        long rawLength,
+        WaveFormat rawFormat,
+        byte[]? existingTargetPcm)
+    {
+        if (rawLength == 0)
         {
             return [];
         }
@@ -711,10 +835,16 @@ internal sealed class DefaultMicrophoneRecorder : IDisposable
             rawFormat.BitsPerSample == TargetBitsPerSample &&
             rawFormat.Channels == TargetChannels)
         {
-            return rawAudio;
+            if (existingTargetPcm is not null)
+            {
+                return existingTargetPcm;
+            }
+
+            using var targetCopy = new MemoryStream(EstimateTargetPcmLength(rawLength, rawFormat));
+            rawStream.CopyTo(targetCopy);
+            return targetCopy.ToArray();
         }
 
-        using var rawStream = new MemoryStream(rawAudio, writable: false);
         using var waveStream = new RawSourceWaveStream(rawStream, rawFormat);
         using var resampler = new MediaFoundationResampler(
             waveStream,
@@ -722,17 +852,35 @@ internal sealed class DefaultMicrophoneRecorder : IDisposable
         {
             ResamplerQuality = 60
         };
-        using var convertedStream = new MemoryStream();
+        using var convertedStream = new MemoryStream(EstimateTargetPcmLength(rawLength, rawFormat));
 
-        var buffer = new byte[TargetSampleRate * TargetChannels * (TargetBitsPerSample / 8)];
-        int bytesRead;
-
-        while ((bytesRead = resampler.Read(buffer, 0, buffer.Length)) > 0)
+        var buffer = ArrayPool<byte>.Shared.Rent(TargetSampleRate * TargetChannels * (TargetBitsPerSample / 8));
+        try
         {
-            convertedStream.Write(buffer, 0, bytesRead);
+            int bytesRead;
+            while ((bytesRead = resampler.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                convertedStream.Write(buffer, 0, bytesRead);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
 
         return convertedStream.ToArray();
+    }
+
+    private static int EstimateTargetPcmLength(long rawLength, WaveFormat rawFormat)
+    {
+        if (rawLength <= 0 || rawFormat.AverageBytesPerSecond <= 0)
+        {
+            return 0;
+        }
+
+        var seconds = (double)rawLength / rawFormat.AverageBytesPerSecond;
+        var targetBytes = seconds * TargetSampleRate * TargetChannels * (TargetBitsPerSample / 8);
+        return targetBytes >= int.MaxValue ? 0 : Math.Max(0, (int)Math.Ceiling(targetBytes));
     }
 }
 

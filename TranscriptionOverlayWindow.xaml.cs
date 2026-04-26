@@ -14,6 +14,8 @@ internal partial class TranscriptionOverlayWindow : Window
     private const int MaxDisplayedTranscriptChars = 900;
     private const int WaveformBarCount = 90;
     private const int ParticleCount = 150;
+    private static readonly SolidColorBrush ReadyBrush = CreateFrozenBrush(32, 164, 112);
+    private static readonly SolidColorBrush RecordingBrush = CreateFrozenBrush(220, 53, 69);
     
     private readonly Random random = new Random();
     private readonly System.Windows.Shapes.Rectangle[] leftBars = new System.Windows.Shapes.Rectangle[WaveformBarCount];
@@ -28,8 +30,8 @@ internal partial class TranscriptionOverlayWindow : Window
     private readonly double[] pVY = new double[ParticleCount];
     private readonly double[] pLife = new double[ParticleCount];
 
-    private DispatcherTimer timer;
-    private DispatcherTimer visualizerTimer;
+    private readonly DispatcherTimer timer;
+    private readonly DispatcherTimer visualizerTimer;
     private DateTime startTime;
     private double currentSmoothedRms;
     private double targetRms;
@@ -57,6 +59,7 @@ internal partial class TranscriptionOverlayWindow : Window
         };
         gradientRight.GradientStops.Add(new GradientStop(MediaColor.FromRgb(0, 122, 204), 0.0));
         gradientRight.GradientStops.Add(new GradientStop(MediaColor.FromRgb(163, 62, 255), 1.0));
+        gradientRight.Freeze();
         
         var gradientLeft = new LinearGradientBrush
         {
@@ -65,6 +68,7 @@ internal partial class TranscriptionOverlayWindow : Window
         };
         gradientLeft.GradientStops.Add(new GradientStop(MediaColor.FromRgb(0, 122, 204), 0.0));
         gradientLeft.GradientStops.Add(new GradientStop(MediaColor.FromRgb(163, 62, 255), 1.0));
+        gradientLeft.Freeze();
 
         for (int i = 0; i < WaveformBarCount; i++)
         {
@@ -101,6 +105,7 @@ internal partial class TranscriptionOverlayWindow : Window
         }
 
         var particleBrush = new SolidColorBrush(MediaColor.FromRgb(100, 200, 255));
+        particleBrush.Freeze();
         for (int i = 0; i < ParticleCount; i++)
         {
             this.ResetParticle(i);
@@ -147,7 +152,7 @@ internal partial class TranscriptionOverlayWindow : Window
     public void SetReadyState()
     {
         this.HeaderText.Text = "Ready";
-        this.StateDot.Fill = new SolidColorBrush(MediaColor.FromRgb(32, 164, 112));
+        this.StateDot.Fill = ReadyBrush;
         this.TranscriptText.Text = "Waiting for hotkey...";
         this.TimerText.Text = "00:00";
         this.timer.Stop();
@@ -245,9 +250,7 @@ internal partial class TranscriptionOverlayWindow : Window
     public void UpdateTranscript(string transcript, bool isProcessing)
     {
         this.HeaderText.Text = isProcessing ? "Processing transcript" : "Listening";
-        this.StateDot.Fill = isProcessing
-            ? new SolidColorBrush(MediaColor.FromRgb(32, 164, 112))
-            : new SolidColorBrush(MediaColor.FromRgb(220, 53, 69));
+        this.StateDot.Fill = isProcessing ? ReadyBrush : RecordingBrush;
         var displayTranscript = transcript.Trim();
         if (displayTranscript.Length > MaxDisplayedTranscriptChars)
         {
@@ -276,6 +279,16 @@ internal partial class TranscriptionOverlayWindow : Window
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        this.timer.Stop();
+        this.timer.Tick -= this.OnTimerTick;
+        this.visualizerTimer.Stop();
+        this.visualizerTimer.Tick -= this.OnVisualizerTick;
+        this.SourceInitialized -= this.OnSourceInitialized;
+        base.OnClosed(e);
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -337,5 +350,12 @@ internal partial class TranscriptionOverlayWindow : Window
         {
             // Ignore clipboard errors
         }
+    }
+
+    private static SolidColorBrush CreateFrozenBrush(byte red, byte green, byte blue)
+    {
+        var brush = new SolidColorBrush(MediaColor.FromRgb(red, green, blue));
+        brush.Freeze();
+        return brush;
     }
 }
