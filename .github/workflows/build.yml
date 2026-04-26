@@ -283,12 +283,17 @@ jobs:
           }
 
       - name: Push Chocolatey package (optional)
-        if: github.event_name == 'push' && steps.version.outputs.is_semver_tag == 'true' && secrets.CHOCO_API_KEY != ''
+        if: github.event_name == 'push' && steps.version.outputs.is_semver_tag == 'true'
         shell: pwsh
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
           CHOCO_SOURCE_URL: ${{ vars.CHOCO_SOURCE_URL }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:CHOCO_API_KEY)) {
+            Write-Host "CHOCO_API_KEY is not configured; skipping Chocolatey push."
+            exit 0
+          }
+
           $nupkgPath = Join-Path $env:INSTALLER_DIR "primedictate.${{ steps.version.outputs.package_version }}.nupkg"
           if (-not (Test-Path $nupkgPath)) {
             throw "Chocolatey package not found for push: $nupkgPath"
