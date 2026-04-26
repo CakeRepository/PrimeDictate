@@ -73,7 +73,7 @@ jobs:
         shell: pwsh
         run: >
           .\scripts\Build-Installers.ps1 -Installer Online -SkipPublish
-          -PackageVersion "${{ steps.version.outputs.package_version }}"
+          -PackageVersion "${{ steps.version.outputs.base_version }}"
           -AssemblyVersion "${{ steps.version.outputs.assembly_version }}"
           -FileVersion "${{ steps.version.outputs.file_version }}"
           -InformationalVersion "${{ steps.version.outputs.informational_version }}"
