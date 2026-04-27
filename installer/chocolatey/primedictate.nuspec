@@ -10,7 +10,7 @@
     <bugTrackerUrl>https://github.com/CakeRepository/PrimeDictate/issues</bugTrackerUrl>
     <docsUrl>https://www.flowdevs.io/portfolio/project/primedictate-local-ai-dictation-app</docsUrl>
     <packageSourceUrl>https://github.com/CakeRepository/PrimeDictate</packageSourceUrl>
-    <iconUrl>https://raw.githubusercontent.com/CakeRepository/PrimeDictate/main/installer/wix/assets/PrimeDictate.ico</iconUrl>
+    <iconUrl>https://raw.githubusercontent.com/CakeRepository/PrimeDictate/main/installer/wix/assets/PrimeDictate-chocolatey-icon.png</iconUrl>
     <licenseUrl>https://github.com/CakeRepository/PrimeDictate?tab=readme-ov-file#license</licenseUrl>
     <releaseNotes>https://github.com/CakeRepository/PrimeDictate/releases</releaseNotes>
     <tags>dictation speech-to-text whisper local-ai wpf windows</tags>
