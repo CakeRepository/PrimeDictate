@@ -7,6 +7,16 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      push_only:
+        description: "Skip build/sign/release and only push existing Chocolatey nupkg"
+        required: false
+        default: false
+        type: boolean
+      target_version:
+        description: "Version to push in push-only mode (example: 3.2.0)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -36,7 +46,22 @@ jobs:
           $releaseTag = ""
           $isSemverTag = "false"
 
-          if ($env:GITHUB_REF -match '^refs/tags/(v\d+\.\d+\.\d+)$') {
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.push_only }}" -eq "true") {
+            $manualVersion = "${{ inputs.target_version }}".Trim()
+            if ([string]::IsNullOrWhiteSpace($manualVersion)) {
+              throw "workflow_dispatch push_only=true requires target_version (for example 3.2.0)."
+            }
+
+            if ($manualVersion -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z\.-]*)?$') {
+              throw "target_version '$manualVersion' is not a valid package version."
+            }
+
+            $packageVersion = $manualVersion
+            $informationalVersion = $manualVersion
+            $releaseTag = "v$manualVersion"
+            $isSemverTag = "true"
+          }
+          elseif ($env:GITHUB_REF -match '^refs/tags/(v\d+\.\d+\.\d+)$') {
             $releaseTag = $Matches[1]
             $packageVersion = $releaseTag.Substring(1)
             $informationalVersion = $packageVersion
@@ -69,7 +94,7 @@ jobs:
 
       - name: Resolve signing mode
         id: signing
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.push_only)
         shell: pwsh
         env:
           AZURESIGNTOOL_KEYVAULT_URL: ${{ secrets.AZURESIGNTOOL_KEYVAULT_URL }}
@@ -96,6 +121,7 @@ jobs:
           }
 
       - name: Restore + build
+        if: !(github.event_name == 'workflow_dispatch' && inputs.push_only)
         run: >
           dotnet build -c Release
           -p:Version=${{ steps.version.outputs.package_version }}
@@ -104,6 +130,7 @@ jobs:
           -p:InformationalVersion=${{ steps.version.outputs.informational_version }}
 
       - name: Publish (win-x64)
+        if: !(github.event_name == 'workflow_dispatch' && inputs.push_only)
         shell: pwsh
         run: >
           .\scripts\Publish-Windows.ps1
@@ -113,12 +140,12 @@ jobs:
           -InformationalVersion "${{ steps.version.outputs.informational_version }}"
 
       - name: Install AzureSignTool
-        if: github.event_name != 'pull_request' && steps.signing.outputs.enabled == 'true'
+        if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.push_only) && steps.signing.outputs.enabled == 'true'
         shell: pwsh
         run: dotnet tool install --global AzureSignTool
 
       - name: Sign publish payload binaries (Azure Key Vault)
-        if: github.event_name != 'pull_request' && steps.signing.outputs.enabled == 'true'
+        if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.push_only) && steps.signing.outputs.enabled == 'true'
         shell: pwsh
         env:
           AZURESIGNTOOL_KEYVAULT_URL: ${{ secrets.AZURESIGNTOOL_KEYVAULT_URL }}
@@ -163,6 +190,7 @@ jobs:
           }
 
       - name: Build online installer
+        if: !(github.event_name == 'workflow_dispatch' && inputs.push_only)
         shell: pwsh
         run: >
           .\scripts\Build-Installers.ps1 -Installer Online -SkipPublish
@@ -172,7 +200,7 @@ jobs:
           -InformationalVersion "${{ steps.version.outputs.informational_version }}"
 
       - name: Sign installer MSI (Azure Key Vault)
-        if: github.event_name != 'pull_request' && steps.signing.outputs.enabled == 'true'
+        if: github.event_name != 'pull_request' && !(github.event_name == 'workflow_dispatch' && inputs.push_only) && steps.signing.outputs.enabled == 'true'
         shell: pwsh
         env:
           AZURESIGNTOOL_KEYVAULT_URL: ${{ secrets.AZURESIGNTOOL_KEYVAULT_URL }}
@@ -212,7 +240,7 @@ jobs:
           }
 
       - name: Upload build artifacts
-        if: always()
+        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.push_only)
         uses: actions/upload-artifact@v4
         with:
           name: prime-dictate-win-x64-${{ steps.version.outputs.package_version }}
@@ -222,7 +250,7 @@ jobs:
             artifacts/installer/*.nupkg
 
       - name: Prepare GitHub release assets
-        if: github.event_name == 'push' && steps.version.outputs.is_semver_tag == 'true'
+        if: github.event_name == 'push' && steps.version.outputs.is_semver_tag == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.push_only)
         id: release_assets
         shell: pwsh
         run: |
@@ -255,7 +283,7 @@ jobs:
           "asset_dir=$assetDir" >> $env:GITHUB_OUTPUT
 
       - name: Publish installers to GitHub Release
-        if: github.event_name == 'push' && steps.version.outputs.is_semver_tag == 'true'
+        if: github.event_name == 'push' && steps.version.outputs.is_semver_tag == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.push_only)
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -282,8 +310,30 @@ jobs:
             throw "Failed to upload release assets for tag $tag"
           }
 
+      - name: Resolve Chocolatey nupkg for push-only mode
+        if: github.event_name == 'workflow_dispatch' && inputs.push_only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ steps.version.outputs.package_version }}"
+          $tag = "${{ steps.version.outputs.release_tag }}"
+          $assetName = "primedictate.$version.nupkg"
+          $outDir = $env:INSTALLER_DIR
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          & gh release download $tag --repo "${{ github.repository }}" --pattern $assetName --dir $outDir --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download $assetName from release $tag."
+          }
+
+          $nupkgPath = Join-Path $outDir $assetName
+          if (-not (Test-Path $nupkgPath)) {
+            throw "Downloaded nupkg not found at $nupkgPath"
+          }
+
       - name: Push Chocolatey package (optional)
-        if: github.event_name == 'push' && steps.version.outputs.is_semver_tag == 'true'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push_only)) && steps.version.outputs.is_semver_tag == 'true'
         shell: pwsh
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
