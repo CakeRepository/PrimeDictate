@@ -1,0 +1,16 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- Optional per-machine launch-at-login Run value. LAUNCHATLOGIN defaults to 1 in each package. -->
+  <Fragment>
+    <ComponentGroup Id="LaunchAtLoginComponents" Directory="INSTALLFOLDER">
+      <Component Id="LaunchAtLoginRunValue" Guid="8B4D72AA-4D19-41BB-A450-04CC9F14E78B" Condition="LAUNCHATLOGIN = &quot;1&quot;">
+        <RegistryValue
+            Root="HKLM"
+            Key="Software\Microsoft\Windows\CurrentVersion\Run"
+            Name="PrimeDictate"
+            Type="string"
+            Value="&quot;[INSTALLFOLDER]PrimeDictate.exe&quot; --from-login"
+            KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

@@ -18,6 +18,7 @@
     <Compile Include="..\shared\AppPayload.wxs" Link="AppPayload.wxs" />
     <Compile Include="..\shared\Branding.wxs" Link="Branding.wxs" />
     <Compile Include="..\shared\StartMenuShortcuts.wxs" Link="StartMenuShortcuts.wxs" />
+    <Compile Include="..\shared\LaunchAtLogin.wxs" Link="LaunchAtLogin.wxs" />
     <Compile Include="OnlineExtras.wxs" />
     <Compile Include="Package.wxs" />
   </ItemGroup>

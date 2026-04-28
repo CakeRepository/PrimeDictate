@@ -3,8 +3,11 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using NAudio.CoreAudioApi;
 using SharpHook.Data;
+using MediaBrush = System.Windows.Media.Brush;
+using MediaColor = System.Windows.Media.Color;
 
 namespace PrimeDictate;
 
@@ -13,6 +16,8 @@ internal partial class SettingsWindow : Window
     private sealed record BackendChoice(TranscriptionBackendKind Kind, string Label, string Description);
     private sealed record HotkeyPrimaryOption(string Label, KeyCode KeyCode);
     private sealed record InputDeviceOption(string? DeviceId, string Label);
+    private sealed record StatsDayBar(string Label, long Words, double BarHeight, MediaBrush Fill);
+    private sealed record AchievementDisplay(string Title, string Detail, string Status, MediaBrush Accent);
 
     private static readonly IReadOnlyList<HotkeyPrimaryOption> PrimaryKeyOptions = BuildPrimaryKeyOptions();
     private static readonly IReadOnlyList<BackendChoice> BackendChoices =
@@ -42,7 +47,7 @@ internal partial class SettingsWindow : Window
     private TranscriptionBackendKind currentBackend;
     private readonly ObservableCollection<TranscriptReplacementRule> transcriptReplacementRules = new();
 
-    internal SettingsWindow(AppSettings settings, bool isFirstRun)
+    internal SettingsWindow(AppSettings settings, bool isFirstRun, DictationStatsState? statsState = null)
     {
         InitializeComponent();
         this.isFirstRun = isFirstRun;
@@ -97,6 +102,7 @@ internal partial class SettingsWindow : Window
         }
 
         this.ReplacementRulesDataGrid.ItemsSource = this.transcriptReplacementRules;
+        this.InitializeStatsTab(settings, statsState);
 
         this.WelcomeTab.Header = isFirstRun ? "Welcome" : "Overview";
         this.HeaderText.Text = isFirstRun ? "PrimeDictate first-run setup" : "PrimeDictate settings";
@@ -720,6 +726,12 @@ internal partial class SettingsWindow : Window
                 this.SetupTabControl.SelectedItem = this.PreferencesTab;
                 return;
             }
+
+            if (this.SetupTabControl.SelectedIndex < this.SetupTabControl.Items.Count - 1)
+            {
+                this.SetupTabControl.SelectedIndex++;
+                return;
+            }
         }
 
         if (!this.TryBuildSettings(out var settings))
@@ -822,7 +834,9 @@ internal partial class SettingsWindow : Window
         {
             0 => "Welcome",
             1 => "Choose your model",
-            _ => "Tune dictation behavior"
+            2 => "Tune dictation behavior",
+            3 => "Configure replacements",
+            _ => "Review impact stats"
         };
 
         this.HeaderSubtextText.Text = $"Step {stepNumber} of {this.SetupTabControl.Items.Count}: {stepLabel}";
@@ -1074,6 +1088,22 @@ internal partial class SettingsWindow : Window
             return false;
         }
 
+        if (!int.TryParse(
+                this.BaselineTypingSpeedTextBox.Text.Trim(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var baselineTypingSpeedWpm) ||
+            baselineTypingSpeedWpm is < 20 or > 120)
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                "Baseline typing speed must be a whole number from 20 to 120 WPM.",
+                "Invalid typing speed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return false;
+        }
+
         var selectedBehavior = ((ComboBoxItem)this.TrayBehaviorComboBox.SelectedItem).Tag?.ToString();
         var selectedOverlayMode = ((ComboBoxItem)this.OverlayModeComboBox.SelectedItem).Tag?.ToString();
         this.currentHotkey = candidate;
@@ -1102,6 +1132,7 @@ internal partial class SettingsWindow : Window
             SendEnterAfterCommit = this.SendEnterAfterCommitCheckBox.IsChecked == true,
             ReturnToStartTargetOnCommit = this.ReturnToStartTargetCheckBox.IsChecked == true,
             PlayAudioCues = this.PlayAudioCuesCheckBox.IsChecked != false,
+            BaselineTypingSpeedWpm = baselineTypingSpeedWpm,
             OverlayMode = selectedOverlayMode == "Full"
                 ? OverlayMode.FullPanel
                 : OverlayMode.CompactMicrophone,
@@ -1117,6 +1148,124 @@ internal partial class SettingsWindow : Window
         };
 
         return true;
+    }
+
+    private void InitializeStatsTab(AppSettings settings, DictationStatsState? statsState)
+    {
+        var state = statsState ?? new DictationStatsState();
+        var baselineWpm = NormalizeBaselineTypingSpeed(settings.BaselineTypingSpeedWpm);
+        var averageWpm = state.TotalAudioSeconds > 0
+            ? state.TotalWords / (state.TotalAudioSeconds / 60.0)
+            : 0;
+        var estimatedTypingTime = TimeSpan.FromMinutes(state.TotalWords / (double)baselineWpm);
+        var netTimeSaved = estimatedTypingTime - TimeSpan.FromSeconds(state.TotalAudioSeconds);
+        if (netTimeSaved < TimeSpan.Zero)
+        {
+            netTimeSaved = TimeSpan.Zero;
+        }
+
+        this.BaselineTypingSpeedTextBox.Text = baselineWpm.ToString(CultureInfo.InvariantCulture);
+        this.StatsTotalWordsText.Text = state.TotalWords.ToString("N0", CultureInfo.InvariantCulture);
+        this.StatsTimeSavedText.Text = FormatDuration(netTimeSaved);
+        this.StatsAverageWpmText.Text = averageWpm > 0
+            ? $"{averageWpm:N0} WPM"
+            : "0 WPM";
+        this.StatsSessionCountText.Text = state.InjectedSessions.ToString("N0", CultureInfo.InvariantCulture);
+        this.DailyStatsItemsControl.ItemsSource = BuildDailyBars(state);
+        this.AchievementItemsControl.ItemsSource = BuildAchievementItems(state);
+    }
+
+    private static int NormalizeBaselineTypingSpeed(int baselineWpm) =>
+        baselineWpm is >= 20 and <= 120
+            ? baselineWpm
+            : AppSettings.DefaultBaselineTypingSpeedWpm;
+
+    private static IReadOnlyList<StatsDayBar> BuildDailyBars(DictationStatsState state)
+    {
+        var byDate = state.DailyStats
+            .Where(day => !string.IsNullOrWhiteSpace(day.Date))
+            .GroupBy(day => day.Date, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Sum(day => day.Words), StringComparer.Ordinal);
+        var today = DateTime.Today;
+        var days = Enumerable.Range(0, 14)
+            .Select(offset => today.AddDays(offset - 13))
+            .Select(day =>
+            {
+                var key = day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                return (Date: day, Words: byDate.TryGetValue(key, out var words) ? words : 0);
+            })
+            .ToList();
+        var maxWords = Math.Max(1, days.Max(day => day.Words));
+        var palette = new[]
+        {
+            CreateBrush(0x38, 0xBD, 0xF8),
+            CreateBrush(0xA7, 0x8B, 0xFA),
+            CreateBrush(0x34, 0xD3, 0x99),
+            CreateBrush(0xF5, 0x9E, 0x0B)
+        };
+
+        return days.Select((day, index) =>
+        {
+            var barHeight = day.Words == 0
+                ? 4
+                : Math.Max(8, Math.Round(day.Words / (double)maxWords * 112));
+            return new StatsDayBar(
+                day.Date.ToString("M/d", CultureInfo.InvariantCulture),
+                day.Words,
+                barHeight,
+                palette[index % palette.Length]);
+        }).ToList();
+    }
+
+    private static IReadOnlyList<AchievementDisplay> BuildAchievementItems(DictationStatsState state)
+    {
+        var achievedBrush = CreateBrush(0x34, 0xD3, 0x99);
+        var pendingBrush = CreateBrush(0x64, 0x74, 0x8B);
+        return DictationStatsStore.Achievements
+            .Select(achievement =>
+            {
+                var unlocked = state.UnlockedAchievementIds.Contains(achievement.Id) ||
+                    state.TotalWords >= achievement.WordThreshold;
+                var remaining = Math.Max(0, achievement.WordThreshold - state.TotalWords);
+                var percent = achievement.WordThreshold == 0
+                    ? 100
+                    : Math.Min(100, state.TotalWords * 100.0 / achievement.WordThreshold);
+                return new AchievementDisplay(
+                    achievement.Title,
+                    unlocked
+                        ? achievement.Message
+                        : $"{percent:N0}% complete - {remaining:N0} words to go.",
+                    unlocked ? "Unlocked" : "Locked",
+                    unlocked ? achievedBrush : pendingBrush);
+            })
+            .ToList();
+    }
+
+    private static MediaBrush CreateBrush(byte red, byte green, byte blue)
+    {
+        var brush = new SolidColorBrush(MediaColor.FromRgb(red, green, blue));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalMinutes < 1)
+        {
+            return "<1 min";
+        }
+
+        if (duration.TotalHours < 1)
+        {
+            return $"{duration.TotalMinutes:N0} min";
+        }
+
+        if (duration.TotalDays < 1)
+        {
+            return $"{duration.TotalHours:N1} hr";
+        }
+
+        return $"{duration.TotalDays:N1} days";
     }
 
     private void OnAddReplacementRuleClick(object sender, RoutedEventArgs e)

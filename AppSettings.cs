@@ -7,6 +7,8 @@ namespace PrimeDictate;
 
 internal sealed class AppSettings
 {
+    internal const int DefaultBaselineTypingSpeedWpm = 40;
+
     public bool FirstRunCompleted { get; set; }
 
     public HotkeyGesture DictationHotkey { get; set; } = HotkeyGesture.Default;
@@ -35,6 +37,8 @@ internal sealed class AppSettings
     public bool ReturnToStartTargetOnCommit { get; set; }
 
     public bool PlayAudioCues { get; set; } = true;
+
+    public int BaselineTypingSpeedWpm { get; set; } = DefaultBaselineTypingSpeedWpm;
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public OverlayMode OverlayMode { get; set; } = OverlayMode.CompactMicrophone;
@@ -71,6 +75,7 @@ internal sealed class AppSettings
         SendEnterAfterCommit = false,
         ReturnToStartTargetOnCommit = false,
         PlayAudioCues = true,
+        BaselineTypingSpeedWpm = DefaultBaselineTypingSpeedWpm,
         OverlayMode = OverlayMode.CompactMicrophone,
         IsOverlaySticky = false,
         EnableOllamaPostProcessing = false,

@@ -23,6 +23,8 @@ public partial class App : System.Windows.Application
     private GlobalHotkeyListener? hotkeyListener;
     private SettingsStore? settingsStore;
     private TranscriptionHistoryStore? historyStore;
+    private DictationStatsStore? statsStore;
+    private DictationStatsState? stats;
     private AppSettings? settings;
     private Task? hookTask;
     private SettingsWindow? settingsWindow;
@@ -50,11 +52,20 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        if (LaunchAtLoginManager.TryHandleCommandLine(e.Args, out var exitCode))
+        {
+            this.Shutdown(exitCode);
+            return;
+        }
+
         this.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         this.settingsStore = new SettingsStore();
         this.historyStore = new TranscriptionHistoryStore();
+        this.statsStore = new DictationStatsStore();
         this.settings = this.settingsStore.LoadOrDefault();
-        this.historyViewModel.Load(this.historyStore.Load());
+        var historyEntries = this.historyStore.Load();
+        this.historyViewModel.Load(historyEntries);
+        this.stats = this.statsStore.LoadOrCreate(historyEntries);
         this.ApplyModelPathOverride(this.settings);
         this.UpdateRuntimeStatusUi();
 
@@ -205,7 +216,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        this.settingsWindow = new SettingsWindow(this.settings, isFirstRun);
+        this.settingsWindow = new SettingsWindow(this.settings, isFirstRun, this.stats);
         this.settingsWindow.Icon = this.CreateWindowIcon();
         this.settingsWindow.SettingsSaved += this.OnSettingsSaved;
         this.settingsWindow.HistoryRequested += this.OnHistoryRequested;
@@ -554,11 +565,29 @@ public partial class App : System.Windows.Application
             OllamaSystemPrompt: commit.OllamaSystemPrompt);
 
         this.historyStore?.Append(entry);
+        var statsUpdate = this.statsStore?.RecordCommit(entry);
+        if (statsUpdate is not null)
+        {
+            this.stats = statsUpdate.State;
+        }
 
         this.Dispatcher.Invoke(() =>
         {
             this.historyViewModel.Add(entry);
+            if (statsUpdate?.NewAchievements.Count > 0)
+            {
+                this.ShowAchievementNotification(statsUpdate.NewAchievements[^1]);
+            }
         });
+    }
+
+    private void ShowAchievementNotification(DictationAchievement achievement)
+    {
+        this.notifyIcon?.ShowBalloonTip(
+            5000,
+            achievement.Title,
+            achievement.Message,
+            Forms.ToolTipIcon.Info);
     }
 
     private void ApplyModelPathOverride(AppSettings configuredSettings)

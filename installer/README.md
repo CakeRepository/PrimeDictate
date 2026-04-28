@@ -6,11 +6,12 @@ The **online** MSI references **`WixToolset.Util.wixext`** (elevated model downl
 
 | MSI | Contents |
 |-----|----------|
-| **Online** (`PrimeDictate-*-Windows-Online.msi`) | App under `Program Files\PrimeDictate`, **Start Menu** shortcut, and **Add/Remove Programs** icon. After files are installed, a **deferred QuietExec** custom action (LocalSystem) runs **`DownloadModel.cmd`** so **`curl`** can write under Program Files. Console output (including **`curl --progress-bar`**) is captured in the MSI log, not in a separate window. **`RunDownloadModelElevated.cmd`** is included if you prefer a visible UAC/console flow. |
+| **Online** (`PrimeDictate-*-Windows-Online.msi`) | App under `Program Files\PrimeDictate`, **Start Menu** shortcut, launch-at-login Run value by default, and **Add/Remove Programs** icon. After files are installed, a **deferred QuietExec** custom action (LocalSystem) runs **`DownloadModel.cmd`** so **`curl`** can write under Program Files. Console output (including **`curl --progress-bar`**) is captured in the MSI log, not in a separate window. **`RunDownloadModelElevated.cmd`** is included if you prefer a visible UAC/console flow. |
 
 ## Installer UX
 
 - **Online MSI**: Uses WiX UI with **“Launch PrimeDictate when setup completes”** (checked by default). If checked, setup launches `[INSTALLFOLDER]PrimeDictate.exe` from the finish dialog after the deferred model download custom action runs in execute sequence.
+- **Launch at login**: Setup installs a Windows Run value by default so PrimeDictate runs after users sign in. Silent installs can opt out with `LAUNCHATLOGIN=0`.
 - **First-run app entry**: Launching at install finish lands users in the app’s first-run setup when `%LocalAppData%\PrimeDictate\settings.json` is not yet completed.
 - **Branding continuity**: ARP metadata, MSI names, Start Menu shortcut text, and finish-page launch prompt now align with the app’s branded status language (**Ready=Blue, Recording=Red, Error=Yellow**).
 - **Upgrade continuity**: The online MSI keeps the existing product identity (`Name` + `UpgradeCode`) for clean upgrades.
@@ -82,9 +83,11 @@ Before pushing a moderated rebuild, verify:
 ## Silent install and upgrade
 
 - Install: `msiexec /i PrimeDictate-<version>-Windows-Online.msi /qn /norestart`
+- Install without launch at login: `msiexec /i PrimeDictate-<version>-Windows-Online.msi LAUNCHATLOGIN=0 /qn /norestart`
 - Upgrade: `msiexec /i PrimeDictate-<version>-Windows-Online.msi REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart`
 - Uninstall: `msiexec /x PrimeDictate-<version>-Windows-Online.msi /qn /norestart`
 - Chocolatey install: `choco install primedictate -y`
+- Chocolatey install without launch at login: `choco install primedictate -y --params "'/NoLaunchAtLogin'"`
 - Chocolatey upgrade: `choco upgrade primedictate -y`
 - Chocolatey uninstall: `choco uninstall primedictate -y`
 
@@ -95,6 +98,7 @@ Before pushing a moderated rebuild, verify:
 | `wix/shared/AppPayload.wxs` | `Program Files\PrimeDictate` tree and harvested publish payload |
 | `wix/shared/Branding.wxs` | ARP icon + common Add/Remove Programs metadata |
 | `wix/shared/StartMenuShortcuts.wxs` | Shared Start Menu shortcut component used by the online installer |
+| `wix/shared/LaunchAtLogin.wxs` | Optional launch-at-login Run value controlled by `LAUNCHATLOGIN` |
 | `wix/online/` | Online package, **Util** QuietExec download, helper `.cmd` scripts |
 | `wix/assets/PrimeDictate.ico` | App + installer icon (also **`ApplicationIcon`** on `PrimeDictate.exe`) |
 | `wix/assets/DownloadModel.cmd` | Curl download used by QuietExec and by the elevated helper |

@@ -108,6 +108,7 @@ internal sealed class DictationController : IAsyncDisposable
     private string ollamaModel = "gemma:2b";
     private OllamaMode ollamaMode = OllamaMode.Default;
     private List<TranscriptReplacementRule> transcriptReplacements = new();
+    private long lastSpeechTicksUtc;
 
     public event Action<bool>? RecordingStateChanged;
     public event Action<bool>? ProcessingStateChanged;
@@ -148,7 +149,7 @@ internal sealed class DictationController : IAsyncDisposable
         this.textInjectionPipeline.UpdateConfiguration(transcriptionBackend, selectedModelId, modelPath, useGpuForWhisper);
         this.recorder.UpdateInputDevice(this.selectedInputDeviceId);
         this.recorder.UpdateInputGain(this.inputGainMultiplier);
-        this.recorder.AudioLevelUpdated += rms => this.AudioLevelUpdated?.Invoke(rms);
+        this.recorder.AudioLevelUpdated += this.OnRecorderAudioLevelUpdated;
     }
 
     public bool IsRecording => this.recorder.IsRecording;
@@ -217,6 +218,7 @@ internal sealed class DictationController : IAsyncDisposable
                 this.activeThreadId = threadId;
                 this.activeInputTarget = ForegroundInputTarget.Capture();
                 Interlocked.Exchange(ref this.autoCommitRequested, 0);
+                Interlocked.Exchange(ref this.lastSpeechTicksUtc, 0);
                 this.ThreadStarted?.Invoke(threadId);
                 this.recorder.Start(useExclusiveMicAccess);
                 this.livePreviewCts = new CancellationTokenSource();
@@ -240,8 +242,7 @@ internal sealed class DictationController : IAsyncDisposable
     private async Task LivePreviewLoopAsync(CancellationToken cancellationToken)
     {
         long lastTranscribedCapturedBytes = 0;
-        var lastSpeechUtc = DateTime.UtcNow;
-        var heardSpeech = false;
+        var recordingStartedUtc = DateTime.UtcNow;
         var nextTranscribeAfterUtc = DateTime.MinValue;
 
         while (true)
@@ -255,46 +256,42 @@ internal sealed class DictationController : IAsyncDisposable
                 break;
             }
 
-            if (!this.recorder.TryGetPcm16KhzMonoSnapshot(
-                    out var snap,
-                    out var capturedBytes,
-                    LivePreviewMaxAudio) ||
-                snap.IsEmpty)
-            {
-                continue;
-            }
-
             var nowUtc = DateTime.UtcNow;
-            if (snap.Duration >= LiveMinAudio && HasRecentSpeech(snap))
-            {
-                heardSpeech = true;
-                lastSpeechUtc = nowUtc;
-            }
+            var lastSpeechUtc = this.GetLastSpeechUtc();
+            var heardSpeech = lastSpeechUtc is DateTime detectedSpeechUtc &&
+                detectedSpeechUtc >= recordingStartedUtc;
 
             if (heardSpeech &&
-                snap.Duration >= LiveMinAudio &&
-                capturedBytes != lastTranscribedCapturedBytes &&
                 nowUtc >= nextTranscribeAfterUtc)
             {
                 nextTranscribeAfterUtc = nowUtc + LiveTranscribeInterval;
-                try
+                if (this.recorder.TryGetPcm16KhzMonoSnapshot(
+                        out var snap,
+                        out var capturedBytes,
+                        LivePreviewMaxAudio) &&
+                    !snap.IsEmpty &&
+                    snap.Duration >= LiveMinAudio &&
+                    capturedBytes != lastTranscribedCapturedBytes)
                 {
-                    var transcript = await this.textInjectionPipeline
-                        .TranscribeAsync(snap, cancellationToken, logTranscript: false)
-                        .ConfigureAwait(false);
-                    lastTranscribedCapturedBytes = capturedBytes;
-                    if (this.activeThreadId is Guid threadId && !string.IsNullOrWhiteSpace(transcript))
+                    try
                     {
-                        this.ThreadTranscriptUpdated?.Invoke(threadId, transcript);
+                        var transcript = await this.textInjectionPipeline
+                            .TranscribeAsync(snap, cancellationToken, logTranscript: false)
+                            .ConfigureAwait(false);
+                        lastTranscribedCapturedBytes = capturedBytes;
+                        if (this.activeThreadId is Guid threadId && !string.IsNullOrWhiteSpace(transcript))
+                        {
+                            this.ThreadTranscriptUpdated?.Invoke(threadId, transcript);
+                        }
                     }
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    AppLog.Error($"Live preview transcription failed: {ex.Message}", this.activeThreadId);
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLog.Error($"Live preview transcription failed: {ex.Message}", this.activeThreadId);
+                    }
                 }
             }
 
@@ -309,7 +306,7 @@ internal sealed class DictationController : IAsyncDisposable
                 silenceDelay = this.autoCommitSilenceDelay;
             }
 
-            if (DateTime.UtcNow - lastSpeechUtc >= silenceDelay)
+            if (lastSpeechUtc is DateTime speechUtc && nowUtc - speechUtc >= silenceDelay)
             {
                 this.RequestCommitAfterSilence();
                 continue;
@@ -348,13 +345,9 @@ internal sealed class DictationController : IAsyncDisposable
                 return;
             }
 
-            if (this.recorder.TryGetPcm16KhzMonoSnapshot(
-                    out var snapshot,
-                    out _,
-                    RecentSpeechWindow + TimeSpan.FromMilliseconds(150)) &&
-                snapshot is not null &&
-                !snapshot.IsEmpty &&
-                HasRecentSpeech(snapshot))
+            var speechResumeWindow = RecentSpeechWindow + TimeSpan.FromMilliseconds(150);
+            if (this.GetLastSpeechUtc() is DateTime lastSpeechUtc &&
+                DateTime.UtcNow - lastSpeechUtc < speechResumeWindow)
             {
                 // If speech resumed while auto-commit was queued, keep recording.
                 Interlocked.Exchange(ref this.autoCommitRequested, 0);
@@ -443,6 +436,7 @@ internal sealed class DictationController : IAsyncDisposable
                     this.ProcessingStateChanged?.Invoke(false);
                 }
 
+                this.recorder.AudioLevelUpdated -= this.OnRecorderAudioLevelUpdated;
                 this.recorder.Dispose();
             }
             finally
@@ -677,6 +671,24 @@ internal sealed class DictationController : IAsyncDisposable
             .ToList();
     }
 
+    private void OnRecorderAudioLevelUpdated(double rms)
+    {
+        if (rms >= SpeechRmsThreshold)
+        {
+            Interlocked.Exchange(ref this.lastSpeechTicksUtc, DateTime.UtcNow.Ticks);
+        }
+
+        this.AudioLevelUpdated?.Invoke(rms);
+    }
+
+    private DateTime? GetLastSpeechUtc()
+    {
+        var ticks = Interlocked.Read(ref this.lastSpeechTicksUtc);
+        return ticks > 0
+            ? new DateTime(ticks, DateTimeKind.Utc)
+            : null;
+    }
+
     private static TimeSpan NormalizeSilenceDelay(TimeSpan delay)
     {
         if (delay < TimeSpan.FromSeconds(1))
@@ -753,31 +765,6 @@ internal sealed class DictationController : IAsyncDisposable
         return char.IsWhiteSpace(boundary) || char.IsPunctuation(boundary);
     }
 
-    private static bool HasRecentSpeech(PcmAudioBuffer audio)
-    {
-        if (audio.BitsPerSample != 16 || audio.Channels != 1 || audio.Pcm16KhzMono.Length < 2)
-        {
-            return true;
-        }
-
-        var sampleBytes = audio.Pcm16KhzMono.AsSpan(0, audio.Pcm16KhzMono.Length & ~1);
-        var samples = MemoryMarshal.Cast<byte, short>(sampleBytes);
-        var totalSamples = samples.Length;
-        var samplesToInspect = Math.Min(
-            totalSamples,
-            Math.Max(1, (int)(audio.SampleRate * RecentSpeechWindow.TotalSeconds)));
-        var startSample = totalSamples - samplesToInspect;
-        long sumSquares = 0;
-
-        for (var sample = startSample; sample < totalSamples; sample++)
-        {
-            var value = samples[sample];
-            sumSquares += (long)value * value;
-        }
-
-        var rms = Math.Sqrt((double)sumSquares / samplesToInspect) / short.MaxValue;
-        return rms >= SpeechRmsThreshold;
-    }
 }
 
 internal sealed class DefaultMicrophoneRecorder : IDisposable

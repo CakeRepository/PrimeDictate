@@ -381,44 +381,206 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <StackPanel Margin="0,18,0,0">
-                            <TextBlock Text="Custom word replacements" FontWeight="SemiBold" />
-                            <TextBlock Margin="0,6,0,0"
-                                       Foreground="{StaticResource TextMutedBrush}"
-                                       TextWrapping="Wrap"
-                                       Text="After transcription, replace phrases in the final text before optional AI polish and typing. Matching is case-insensitive; longer phrases are applied first." />
-                            <DataGrid Name="ReplacementRulesDataGrid"
-                                      Height="168"
-                                      Margin="0,8,0,0"
-                                      AutoGenerateColumns="False"
-                                      CanUserAddRows="False"
-                                      HeadersVisibility="Column">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Find"
-                                                        Binding="{Binding Find, UpdateSourceTrigger=PropertyChanged}"
-                                                        Width="*" />
-                                    <DataGridTextColumn Header="Replace with"
-                                                        Binding="{Binding Replace, UpdateSourceTrigger=PropertyChanged}"
-                                                        Width="*" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-                            <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
-                                <Button Name="AddReplacementRuleButton"
-                                        Width="88"
-                                        Content="Add rule"
-                                        Click="OnAddReplacementRuleClick" />
-                                <Button Name="RemoveReplacementRuleButton"
-                                        Width="120"
-                                        Margin="10,0,0,0"
-                                        Content="Remove selected"
-                                        Click="OnRemoveReplacementRuleClick" />
-                            </StackPanel>
-                        </StackPanel>
-
                         <TextBlock Margin="0,18,0,0"
                                     Foreground="{StaticResource TextMutedBrush}"
                                     TextWrapping="Wrap"
                                     Text="Press your hotkey globally to start dictation. Live preview stays in the overlay, then the final transcript is typed once after silence or when you stop manually." />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Name="ReplacementsTab" Header="Replacements">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="14">
+                        <TextBlock FontSize="15"
+                                   FontWeight="SemiBold"
+                                   Text="Transcript tuning" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap"
+                                   Text="After transcription, replace phrases in the final text before optional AI polish and typing. Matching is case-insensitive; longer phrases are applied first." />
+                        <DataGrid Name="ReplacementRulesDataGrid"
+                                  Height="260"
+                                  Margin="0,14,0,0"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Find"
+                                                    Binding="{Binding Find, UpdateSourceTrigger=PropertyChanged}"
+                                                    Width="*" />
+                                <DataGridTextColumn Header="Replace with"
+                                                    Binding="{Binding Replace, UpdateSourceTrigger=PropertyChanged}"
+                                                    Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
+                            <Button Name="AddReplacementRuleButton"
+                                    Width="88"
+                                    Content="Add rule"
+                                    Click="OnAddReplacementRuleClick" />
+                            <Button Name="RemoveReplacementRuleButton"
+                                    Width="120"
+                                    Margin="10,0,0,0"
+                                    Content="Remove selected"
+                                    Click="OnRemoveReplacementRuleClick" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Name="ImpactTab" Header="Impact">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="14">
+                        <TextBlock FontSize="15"
+                                   FontWeight="SemiBold"
+                                   Text="Dictation impact" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap"
+                                   Text="Local stats are counted from successful transcript commits and stay on this PC." />
+
+                        <UniformGrid Margin="0,16,0,0" Columns="2" Rows="2">
+                            <Border Margin="0,0,8,8"
+                                    Padding="14"
+                                    CornerRadius="8"
+                                    BorderBrush="#5038BDF8"
+                                    BorderThickness="1">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#3338BDF8" Offset="0" />
+                                        <GradientStop Color="#220F172A" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <StackPanel>
+                                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" Text="Words typed" />
+                                    <TextBlock Name="StatsTotalWordsText" FontSize="28" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                            <Border Margin="8,0,0,8"
+                                    Padding="14"
+                                    CornerRadius="8"
+                                    BorderBrush="#50A78BFA"
+                                    BorderThickness="1">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#33A78BFA" Offset="0" />
+                                        <GradientStop Color="#22111827" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <StackPanel>
+                                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" Text="Net time saved" />
+                                    <TextBlock Name="StatsTimeSavedText" FontSize="28" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                            <Border Margin="0,8,8,0"
+                                    Padding="14"
+                                    CornerRadius="8"
+                                    BorderBrush="#5034D399"
+                                    BorderThickness="1">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#3334D399" Offset="0" />
+                                        <GradientStop Color="#22111827" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <StackPanel>
+                                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" Text="Average speech pace" />
+                                    <TextBlock Name="StatsAverageWpmText" FontSize="28" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                            <Border Margin="8,8,0,0"
+                                    Padding="14"
+                                    CornerRadius="8"
+                                    BorderBrush="#50F59E0B"
+                                    BorderThickness="1">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#33F59E0B" Offset="0" />
+                                        <GradientStop Color="#22111827" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <StackPanel>
+                                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" Text="Successful sessions" />
+                                    <TextBlock Name="StatsSessionCountText" FontSize="28" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                        </UniformGrid>
+
+                        <StackPanel Margin="0,18,0,0" Orientation="Horizontal">
+                            <TextBlock VerticalAlignment="Center" Text="Compare against typing at" />
+                            <TextBox Name="BaselineTypingSpeedTextBox"
+                                     Width="54"
+                                     Margin="8,0,8,0"
+                                     VerticalContentAlignment="Center" />
+                            <TextBlock VerticalAlignment="Center" Text="WPM" />
+                        </StackPanel>
+
+                        <TextBlock Margin="0,18,0,0"
+                                   FontWeight="SemiBold"
+                                   Text="Last 14 days" />
+                        <ItemsControl Name="DailyStatsItemsControl" Margin="0,10,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Rows="1" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="2,0" VerticalAlignment="Bottom">
+                                        <TextBlock Text="{Binding Words}"
+                                                   FontSize="10"
+                                                   HorizontalAlignment="Center"
+                                                   Foreground="{StaticResource TextMutedBrush}" />
+                                        <Border Height="118"
+                                                Margin="0,4,0,4"
+                                                Background="{StaticResource SurfaceElevatedBrush}"
+                                                CornerRadius="5"
+                                                VerticalAlignment="Bottom">
+                                            <Border Height="{Binding BarHeight}"
+                                                    VerticalAlignment="Bottom"
+                                                    Background="{Binding Fill}"
+                                                    CornerRadius="5" />
+                                        </Border>
+                                        <TextBlock Text="{Binding Label}"
+                                                   FontSize="10"
+                                                   HorizontalAlignment="Center"
+                                                   Foreground="{StaticResource TextMutedBrush}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Margin="0,18,0,0"
+                                   FontWeight="SemiBold"
+                                   Text="Achievements" />
+                        <ItemsControl Name="AchievementItemsControl" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,8"
+                                            Padding="12"
+                                            Background="{StaticResource SurfaceElevatedBrush}"
+                                            BorderBrush="{Binding Accent}"
+                                            BorderThickness="1"
+                                            CornerRadius="8">
+                                        <DockPanel LastChildFill="True">
+                                            <TextBlock DockPanel.Dock="Right"
+                                                       Margin="14,0,0,0"
+                                                       Foreground="{Binding Accent}"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding Status}" />
+                                            <StackPanel>
+                                                <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+                                                <TextBlock Margin="0,4,0,0"
+                                                           Foreground="{StaticResource TextMutedBrush}"
+                                                           TextWrapping="Wrap"
+                                                           Text="{Binding Detail}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

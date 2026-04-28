@@ -12,6 +12,7 @@
     <MediaTemplate EmbedCab="yes" />
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)..\assets\License.rtf" />
+    <Property Id="LAUNCHATLOGIN" Value="1" />
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch PrimeDictate (Ready=Blue, Recording=Red, Error=Yellow tray status)" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
@@ -51,6 +52,7 @@
         Level="1">
       <ComponentGroupRef Id="AppComponents" />
       <ComponentGroupRef Id="StartMenuShortcutComponents" />
+      <ComponentGroupRef Id="LaunchAtLoginComponents" />
       <ComponentGroupRef Id="OnlineScriptComponents" />
     </Feature>
 

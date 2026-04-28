@@ -26,6 +26,7 @@
 ![Compact Mic Overlay](assets/overlay_compact.png)
 - **Silence auto-commit**: When speech has stopped for the configured delay (default 3 seconds), PrimeDictate stops capture, runs a final transcription pass, and sends the final text once.
 - **Transcript history**: Every committed transcript is saved to local history so you can review past dictations, recover text sent to the wrong app, and copy transcript text (with or without metadata).
+- **Impact stats and achievements**: Successful dictations update local-only productivity stats, including words typed, estimated net time saved, average speaking WPM, last-14-day bars, and milestone notifications.
 - **History filters and detail view**: History includes a filter dropdown (**All**, **Injected**, **NotInjected**) plus an expanded detail pane for full transcript and target metadata.
 - **History entry points**: Open history from the tray menu, from the settings window, or from the workspace toolbar.
 - **Final-only target typing**: The target editor is not mutated while recording. Live corrections stay in the overlay so code editors and IntelliSense are not fighting backspace/retype updates.
@@ -34,6 +35,7 @@
 - **Return to original target (optional)**: A dictation setting can deliver the final transcript back to the window that had focus when recording started, first trying a safe direct write to the captured edit control on Windows and otherwise reactivating that window before typing.
 - **Built-in pointer cue**: If Windows Mouse Sonar is enabled, PrimeDictate pulses it on recording/processing transitions by tapping Ctrl. It does not draw a custom pointer overlay or change the user's Windows setting.
 - **Custom audio earcons**: PrimeDictate can play its own short start/stop tones so you hear when recording begins and when capture hands off to transcription.
+- **Launch at login**: Installers enable automatic startup by default so PrimeDictate is ready after a reboot. Silent MSI and Chocolatey installs can opt out.
 - **Audio**: Windows default capture device via NAudio **WASAPI** (`WasapiCapture`), resampled to **16 kHz, 16-bit, mono PCM** for local transcription engines.
 - **Mic isolation mode (best effort)**: Optional exclusive-capture setting can block other apps from the mic on supported devices; if exclusive capture fails, PrimeDictate automatically falls back to shared mode and continues dictation.
 - **Inference**: [Whisper.net](https://www.nuget.org/packages/Whisper.net) `1.9.0` for GGML Whisper models plus [sherpa-onnx](https://www.nuget.org/packages/org.k2fsa.sherpa.onnx) for Parakeet ONNX models.
@@ -174,9 +176,11 @@ For moderation retries, maintainers can repack and push locally with the same ve
 ### Silent install and update commands (Windows)
 
 - MSI install (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z.msi /qn /norestart`
+- MSI install without launch at login: `msiexec /i PrimeDictate-Setup-vX.Y.Z.msi LAUNCHATLOGIN=0 /qn /norestart`
 - MSI upgrade (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z.msi REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart`
 - MSI uninstall (silent): `msiexec /x PrimeDictate-Setup-vX.Y.Z.msi /qn /norestart`
 - Chocolatey install (silent by default): `choco install primedictate -y`
+- Chocolatey install without launch at login: `choco install primedictate -y --params "'/NoLaunchAtLogin'"`
 - Chocolatey upgrade (silent): `choco upgrade primedictate -y`
 - Chocolatey uninstall (silent): `choco uninstall primedictate -y`
 
@@ -186,13 +190,15 @@ PrimeDictate now runs as a **WPF tray app** (no console window in normal use):
 
 - **Tray shell**: Notification-area icon with **Open Workspace**, **Settings**, and **Exit** menu items.
 - **Tray status colors**: **Ready = Blue**, **Recording = Red**, **Processing = Green**, **Error = Yellow**. Tooltip text follows app state (`Ready`, `Listening`, `Processing transcript`, `Error`).
-- **First launch**: If `%LocalAppData%\PrimeDictate\settings.json` is missing or incomplete, a guided setup window appears with **Welcome**, **Model**, and **Dictation** tabs.
+- **First launch**: If `%LocalAppData%\PrimeDictate\settings.json` is missing or incomplete, a guided setup window appears with **Welcome**, **Model**, **Dictation**, **Replacements**, and **Impact** tabs.
 - **Configurable hotkey**: Global hotkey is loaded from saved settings and applied to `GlobalHotkeyListener` at startup (default remains `Ctrl+Shift+Space` until changed).
 - **Backend picker + download**: Setup and Settings include curated Whisper, Parakeet, and Moonshine model options, local download progress, and a manual browse fallback.
 - **Runtime model switching**: Changing the selected backend or model causes the next transcription session to reload the correct engine automatically.
 - **Preview settings**: Setup window includes the overlay style, silence auto-commit delay, optional coding-mode Enter key, PrimeDictate audio cues, and mic capture behavior.
+- **Impact dashboard**: Settings includes a local stats tab with productivity cards, a 14-day words chart, and milestone achievements.
 - **Installer continuity**: The online MSI keeps one product identity for clean upgrades.
 - **Installer finish launch**: The online MSI exposes **“Launch PrimeDictate when setup completes”** (checked by default), which starts the app after install.
+- **Launch at login**: MSI installs add a Windows Run value by default. Use `LAUNCHATLOGIN=0` for silent MSI installs or Chocolatey `/NoLaunchAtLogin` when you do not want PrimeDictate to start when users sign in.
 
 **Publish folder only** (no installer):
 
@@ -234,12 +240,14 @@ The app starts in the tray. On first launch, complete setup, then focus another 
 | Mechanism | Purpose |
 |-----------|---------|
 | `PRIME_DICTATE_MODEL` | Absolute path to the active GGML Whisper model file. PrimeDictate sets this process-locally from saved settings only when the Whisper backend is selected. |
+| `--enable-launch-at-login` / `--disable-launch-at-login` | Command line switches that add or remove the Windows Run entry for PrimeDictate. Machine-wide entries require an elevated shell to disable. |
 | `WhisperProcessorBuilder` | Language detection and other inference options are set in `WhisperTextInjectionPipeline` (`WithLanguageDetection()`, etc.). |
-| User settings + first-run | Stored at `%LocalAppData%\PrimeDictate\settings.json` with `FirstRunCompleted`, dictation hotkey, selected backend, selected model id, resolved model path, optional exclusive mic capture toggle, overlay style, silence auto-commit delay, return-to-original-target toggle, audio cue toggle, overlay placement, and coding-mode Enter toggle. |
+| User settings + first-run | Stored at `%LocalAppData%\PrimeDictate\settings.json` with `FirstRunCompleted`, dictation hotkey, selected backend, selected model id, resolved model path, optional exclusive mic capture toggle, overlay style, silence auto-commit delay, return-to-original-target toggle, audio cue toggle, overlay placement, coding-mode Enter toggle, and baseline typing speed for impact estimates. |
 
 ![Dictation Settings](assets/settings_dictation.png)
 
 | Transcript history | Stored at `%LocalAppData%\PrimeDictate\history.json` with timestamp, transcript text, thread id, delivery status, target display name, optional error, and audio duration metadata. |
+| Impact stats | Stored at `%LocalAppData%\PrimeDictate\stats.json` with local aggregate word counts, audio duration, daily buckets, and unlocked achievements. |
 
 ## Architecture (high level)
 
