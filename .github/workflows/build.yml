@@ -356,5 +356,6 @@ jobs:
           $sourceUrl = if ([string]::IsNullOrWhiteSpace($env:CHOCO_SOURCE_URL)) { "https://push.chocolatey.org/" } else { $env:CHOCO_SOURCE_URL.Trim() }
           choco push $nupkgPath --source $sourceUrl --api-key $env:CHOCO_API_KEY --timeout 2700
           if ($LASTEXITCODE -ne 0) {
-            throw "Chocolatey push failed with exit code $LASTEXITCODE"
+            Write-Warning "Chocolatey push failed with exit code $LASTEXITCODE. GitHub release assets were already published, so the optional Chocolatey publishing step will not fail the release build."
+            exit 0
           }
