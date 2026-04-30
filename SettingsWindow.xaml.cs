@@ -38,7 +38,7 @@ internal partial class SettingsWindow : Window
         new(
             TranscriptionBackendKind.WhisperNet,
             "Whisper.net (GGML)",
-            "Native Whisper.net GGML models with NPU support (via OpenVINO) and access to larger V3 models."),
+            "Native Whisper.net GGML models with GPU support through CUDA/Vulkan, optional OpenVINO NPU sidecars, and access to larger V3 models."),
         new(
             TranscriptionBackendKind.QualcommQnn,
             "Qualcomm QNN (Experimental)",
@@ -48,6 +48,7 @@ internal partial class SettingsWindow : Window
     private bool isCapturingHotkey;
     private bool suppressModelChoiceChanged;
     private bool suppressBackendChoiceChanged;
+    private bool suppressComputeChoiceChanged;
     private bool suppressModelPathTextChanged;
     private HotkeyGesture currentHotkey;
     private readonly bool isFirstRun;
@@ -72,7 +73,7 @@ internal partial class SettingsWindow : Window
         this.ModelBackendComboBox.ItemsSource = this.availableBackendChoices;
         this.ModelBackendComboBox.DisplayMemberPath = nameof(BackendChoice.Label);
         this.ModelChoiceComboBox.DisplayMemberPath = nameof(WhisperModelOption.DisplayName);
-        this.SelectComputeInterface(settings.TranscriptionComputeInterface);
+        this.ComputeInterfaceComboBox.DisplayMemberPath = nameof(TranscriptionComputeChoice.Label);
 
         this.ApplyHotkeyToBuilder(this.currentHotkey);
         this.HotkeyValueText.Text = this.currentHotkey.ToString();
@@ -170,13 +171,15 @@ internal partial class SettingsWindow : Window
         this.ApplyBackendSelection(
             backendChoice.Kind,
             settings.SelectedModelId,
-            settings.ModelPath);
+            settings.ModelPath,
+            settings.TranscriptionComputeInterface);
     }
 
     private void ApplyBackendSelection(
         TranscriptionBackendKind backend,
         string? preferredModelId,
-        string? configuredModelPath)
+        string? configuredModelPath,
+        TranscriptionComputeInterface? preferredComputeInterface = null)
     {
         this.currentBackend = backend;
         object selectedOption = backend switch
@@ -212,6 +215,7 @@ internal partial class SettingsWindow : Window
         };
 
         this.SetModelPathText(initialPath);
+        this.UpdateComputeInterfaceAvailability(preferredComputeInterface);
         this.UpdateBackendUi();
         this.UpdateModelSelectionUi();
     }
@@ -944,8 +948,17 @@ internal partial class SettingsWindow : Window
         }
 
         this.ApplyBackendSelection(choice.Kind, preferredModelId: null, configuredModelPath: null);
-        this.SelectDefaultComputeInterfaceForBackend(choice.Kind);
         this.UpdateBackendUi();
+    }
+
+    private void OnComputeInterfaceChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (this.suppressComputeChoiceChanged)
+        {
+            return;
+        }
+
+        this.UpdateComputeInterfaceDescription();
     }
 
     private void OnSetupTabSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1030,6 +1043,8 @@ internal partial class SettingsWindow : Window
 
     private void UpdateModelSelectionUi()
     {
+        this.UpdateComputeInterfaceAvailability(this.GetSelectedComputeInterface());
+
         switch (this.currentBackend)
         {
             case TranscriptionBackendKind.Moonshine:
@@ -1467,84 +1482,53 @@ internal partial class SettingsWindow : Window
 
     private TranscriptionComputeInterface GetSelectedComputeInterface()
     {
-        if (this.currentBackend == TranscriptionBackendKind.WhisperNet &&
-            !PlatformSupport.SupportsWhisperNetOpenVino)
+        if (this.ComputeInterfaceComboBox.SelectedItem is TranscriptionComputeChoice choice)
         {
-            return TranscriptionComputeInterface.Cpu;
-        }
-
-        if (this.ComputeInterfaceComboBox.SelectedItem is ComboBoxItem { Tag: string tag } &&
-            Enum.TryParse<TranscriptionComputeInterface>(tag, ignoreCase: true, out var parsed))
-        {
-            return parsed;
+            return choice.Kind;
         }
 
         return TranscriptionComputeInterface.Cpu;
     }
 
-    private void SelectComputeInterface(TranscriptionComputeInterface computeInterface)
+    private void UpdateComputeInterfaceAvailability(TranscriptionComputeInterface? preferredComputeInterface = null)
     {
-        foreach (var item in this.ComputeInterfaceComboBox.Items)
-        {
-            if (item is ComboBoxItem comboItem &&
-                string.Equals(comboItem.Tag?.ToString(), computeInterface.ToString(), StringComparison.OrdinalIgnoreCase))
-            {
-                this.ComputeInterfaceComboBox.SelectedItem = comboItem;
-                return;
-            }
-        }
+        var currentPath = this.ModelPathTextBox.Text.Trim();
+        var selectedModelId = this.GetSelectedModelIdForCurrentBackend();
+        var choices = TranscriptionRuntimeSupport.GetComputeChoices(
+            this.currentBackend,
+            selectedModelId,
+            currentPath);
+        var requestedComputeInterface = preferredComputeInterface ?? this.GetSelectedComputeInterface();
+        var selectedChoice =
+            choices.FirstOrDefault(choice => choice.Kind == requestedComputeInterface) ??
+            choices.FirstOrDefault(choice => choice.Kind == TranscriptionRuntimeSupport.GetBestComputeInterface(
+                this.currentBackend,
+                selectedModelId,
+                currentPath)) ??
+            choices[0];
 
-        this.ComputeInterfaceComboBox.SelectedIndex = 0;
+        this.suppressComputeChoiceChanged = true;
+        this.ComputeInterfaceComboBox.ItemsSource = choices;
+        this.ComputeInterfaceComboBox.SelectedItem = selectedChoice;
+        this.suppressComputeChoiceChanged = false;
+        this.UpdateComputeInterfaceDescription();
     }
 
-    private void UpdateComputeInterfaceAvailability()
+    private string? GetSelectedModelIdForCurrentBackend() =>
+        this.currentBackend switch
+        {
+            TranscriptionBackendKind.Moonshine => (this.ModelChoiceComboBox.SelectedItem as MoonshineModelOption)?.Id,
+            TranscriptionBackendKind.Parakeet => (this.ModelChoiceComboBox.SelectedItem as ParakeetModelOption)?.Id,
+            TranscriptionBackendKind.QualcommQnn => (this.ModelChoiceComboBox.SelectedItem as MoonshineModelOption)?.Id,
+            TranscriptionBackendKind.WhisperNet => (this.ModelChoiceComboBox.SelectedItem as WhisperNetModelOption)?.Id,
+            _ => (this.ModelChoiceComboBox.SelectedItem as WhisperModelOption)?.Id
+        };
+
+    private void UpdateComputeInterfaceDescription()
     {
-        foreach (var item in this.ComputeInterfaceComboBox.Items)
-        {
-            if (item is ComboBoxItem comboItem)
-            {
-                comboItem.IsEnabled = true;
-            }
-        }
-
-        if (this.currentBackend == TranscriptionBackendKind.WhisperNet &&
-            !PlatformSupport.SupportsWhisperNetOpenVino)
-        {
-            this.SetComputeInterfaceEnabled("Gpu", false);
-            this.SetComputeInterfaceEnabled("Npu", false);
-            this.SelectComputeInterface(TranscriptionComputeInterface.Cpu);
-            return;
-        }
-
-        if (this.currentBackend == TranscriptionBackendKind.QualcommQnn)
-        {
-            this.SetComputeInterfaceEnabled("Gpu", false);
-            if (this.ComputeInterfaceComboBox.SelectedItem is ComboBoxItem { Tag: string selectedTag } &&
-                string.Equals(selectedTag, TranscriptionComputeInterface.Gpu.ToString(), StringComparison.OrdinalIgnoreCase))
-            {
-                this.SelectComputeInterface(TranscriptionComputeInterface.Npu);
-            }
-        }
-    }
-
-    private void SelectDefaultComputeInterfaceForBackend(TranscriptionBackendKind backend)
-    {
-        if (backend == TranscriptionBackendKind.QualcommQnn)
-        {
-            this.SelectComputeInterface(TranscriptionComputeInterface.Npu);
-        }
-    }
-
-    private void SetComputeInterfaceEnabled(string tag, bool isEnabled)
-    {
-        foreach (var item in this.ComputeInterfaceComboBox.Items)
-        {
-            if (item is ComboBoxItem comboItem &&
-                string.Equals(comboItem.Tag?.ToString(), tag, StringComparison.OrdinalIgnoreCase))
-            {
-                comboItem.IsEnabled = isEnabled;
-            }
-        }
+        this.ComputeInterfaceDescriptionText.Text = this.ComputeInterfaceComboBox.SelectedItem is TranscriptionComputeChoice choice
+            ? choice.Description
+            : "Only supported compute configurations are shown for the selected backend and model.";
     }
 
     private void InitializeStatsTab(AppSettings settings, DictationStatsState? statsState)
@@ -1736,9 +1720,10 @@ internal partial class SettingsWindow : Window
 
     private static IReadOnlyList<BackendChoice> GetAvailableBackendChoices(TranscriptionBackendKind selectedBackend)
     {
-        var shouldIncludeQualcommQnn = PlatformSupport.ShouldOfferQualcommQnnBackend || selectedBackend == TranscriptionBackendKind.QualcommQnn;
         return AllBackendChoices
-            .Where(choice => shouldIncludeQualcommQnn || choice.Kind != TranscriptionBackendKind.QualcommQnn)
+            .Where(choice =>
+                TranscriptionRuntimeSupport.IsBackendSupportedOnCurrentMachine(choice.Kind) ||
+                choice.Kind == selectedBackend)
             .ToArray();
     }
 

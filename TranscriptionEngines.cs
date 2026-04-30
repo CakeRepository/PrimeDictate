@@ -307,13 +307,7 @@ internal abstract class SherpaOnnxTranscriptionEngine : ITranscriptionEngine
         this.loadedProvider = null;
     }
 
-    private static string ResolveProvider(TranscriptionComputeInterface computeInterface) =>
-        computeInterface switch
-        {
-            TranscriptionComputeInterface.Gpu => "directml",
-            TranscriptionComputeInterface.Npu => "directml",
-            _ => "cpu"
-        };
+    private static string ResolveProvider(TranscriptionComputeInterface computeInterface) => "cpu";
 
     private static void DisposeRecognizer(object? recognizer)
     {
@@ -597,7 +591,13 @@ internal sealed class WhisperNetTranscriptionEngine : ITranscriptionEngine
             this.loadedComputeInterface = configuration.ComputeInterface;
 
             AppLog.Info($"Whisper.net native runtime selected: {RuntimeOptions.LoadedLibrary}");
-            if (openVinoEncoderPath is not null && RuntimeOptions.LoadedLibrary != RuntimeLibrary.OpenVino)
+            if (configuration.ComputeInterface == TranscriptionComputeInterface.Gpu &&
+                RuntimeOptions.LoadedLibrary is not RuntimeLibrary.Cuda and not RuntimeLibrary.Vulkan)
+            {
+                AppLog.Info(
+                    $"GPU was requested, but Whisper.net loaded {RuntimeOptions.LoadedLibrary} instead. Check CUDA/Vulkan runtime availability if GPU transcription is expected.");
+            }
+            else if (openVinoEncoderPath is not null && RuntimeOptions.LoadedLibrary != RuntimeLibrary.OpenVino)
             {
                 AppLog.Info(
                     $"OpenVINO was requested for device {openVinoDevice}, but Whisper.net loaded {RuntimeOptions.LoadedLibrary} instead. Final transcription will not use the NPU until the OpenVINO runtime can be loaded.");
@@ -663,13 +663,14 @@ internal sealed class WhisperNetTranscriptionEngine : ITranscriptionEngine
         RuntimeOptions.RuntimeLibraryOrder = computeInterface switch
         {
             TranscriptionComputeInterface.Cpu => [RuntimeLibrary.Cpu, RuntimeLibrary.CpuNoAvx],
+            TranscriptionComputeInterface.Gpu => [RuntimeLibrary.Cuda, RuntimeLibrary.Vulkan, RuntimeLibrary.Cpu, RuntimeLibrary.CpuNoAvx],
             _ when preferOpenVino => [RuntimeLibrary.OpenVino, RuntimeLibrary.Cpu, RuntimeLibrary.CpuNoAvx],
             _ => [RuntimeLibrary.Cpu, RuntimeLibrary.CpuNoAvx]
         };
     }
 
     private static bool ShouldUseOpenVino(TranscriptionComputeInterface computeInterface) =>
-        computeInterface is TranscriptionComputeInterface.Gpu or TranscriptionComputeInterface.Npu;
+        computeInterface == TranscriptionComputeInterface.Npu;
 
     private static string GetOpenVinoDevice(TranscriptionComputeInterface computeInterface) =>
         computeInterface switch

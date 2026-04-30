@@ -66,13 +66,13 @@ internal static class WhisperNetModelCatalog
             Id: "large-v3-turbo",
             DisplayName: "Large V3 Turbo (GGML)",
             FileName: "ggml-large-v3-turbo.bin",
-            Description: "The fastest Whisper V3 GGML option. Intel does not currently publish an OpenVINO bundle for Turbo, so this model is CPU-only in PrimeDictate.",
+            Description: "The fastest Whisper V3 GGML option. It can use Whisper.net GPU runtimes when available; Intel does not currently publish an OpenVINO NPU bundle for Turbo.",
             ApproximateBytes: 1_618_426_976),
         new(
             Id: "large-v3",
             DisplayName: "Large V3 (GGML)",
             FileName: "ggml-large-v3.bin",
-            Description: "The highest-accuracy Whisper V3 model. Intel publishes a matching OpenVINO bundle for this model, so it is the best Whisper.net choice for NPU acceleration.",
+            Description: "The highest-accuracy Whisper V3 model. It can use Whisper.net GPU runtimes, and Intel publishes a matching OpenVINO bundle for NPU acceleration.",
             ApproximateBytes: 4_277_163_902,
             OpenVinoBundleFileName: "ggml-large-v3-models.zip",
             Recommended: true),
@@ -80,13 +80,13 @@ internal static class WhisperNetModelCatalog
             Id: "base.en",
             DisplayName: "Base English (GGML)",
             FileName: "ggml-base.en.bin",
-            Description: "Standard English GGML model. Intel does not currently publish a matching OpenVINO bundle for the English-only base model.",
+            Description: "Standard English GGML model. It can use Whisper.net GPU runtimes when available; Intel does not currently publish a matching OpenVINO NPU bundle for the English-only base model.",
             ApproximateBytes: 147_964_352),
         new(
             Id: "tiny.en",
             DisplayName: "Tiny English (GGML)",
             FileName: "ggml-tiny.en.bin",
-            Description: "Very small English GGML model. Intel does not currently publish a matching OpenVINO bundle for Tiny English.",
+            Description: "Very small English GGML model. It can use Whisper.net GPU runtimes when available; Intel does not currently publish a matching OpenVINO NPU bundle for Tiny English.",
             ApproximateBytes: 77_720_256)
     ];
 

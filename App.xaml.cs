@@ -69,6 +69,11 @@ public partial class App : System.Windows.Application
         this.historyStore = new TranscriptionHistoryStore();
         this.statsStore = new DictationStatsStore();
         this.settings = this.settingsStore.LoadOrDefault();
+        if (TranscriptionRuntimeSupport.NormalizeSettingsForCurrentMachine(this.settings))
+        {
+            this.settingsStore.Save(this.settings);
+        }
+
         var historyEntries = this.historyStore.Load();
         this.historyViewModel.Load(historyEntries);
         this.stats = this.statsStore.LoadOrCreate(historyEntries);

@@ -38,14 +38,14 @@
 - **Launch at login**: Installers enable automatic startup by default so PrimeDictate is ready after a reboot. Silent MSI and Chocolatey installs can opt out.
 - **Audio**: Windows default capture device via NAudio **WASAPI** (`WasapiCapture`), resampled to **16 kHz, 16-bit, mono PCM** for local transcription engines.
 - **Mic isolation mode (best effort)**: Optional exclusive-capture setting can block other apps from the mic on supported devices; if exclusive capture fails, PrimeDictate automatically falls back to shared mode and continues dictation.
-- **Inference**: A shared transcription engine abstraction with Whisper, Parakeet, and Moonshine ONNX models through [sherpa-onnx](https://www.nuget.org/packages/org.k2fsa.sherpa.onnx).
+- **Inference**: A shared transcription engine abstraction with Whisper, Parakeet, and Moonshine ONNX models through [sherpa-onnx](https://www.nuget.org/packages/org.k2fsa.sherpa.onnx), plus Whisper.net GGML for GPU/NPU-capable local Whisper runs.
 - **Injection**: [SharpHook](https://www.nuget.org/packages/SharpHook) `EventSimulator` for Unicode text entry (no synthetic paste, no clipboard round-trip on the hot path).
 
 ## Requirements
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (or a compatible SDK that can build `net8.0` projects).
 - **Windows** is the primary target (WASAPI capture path). Other platforms may require a different capture implementation.
-- The transcription backend uses sherpa-onnx model folders, so each model install must include the required ONNX files and tokens file for that backend.
+- The transcription backend uses local model files only. sherpa-onnx backends require ONNX model folders with tokens; Whisper.net uses GGML `.bin` files and optional OpenVINO sidecars.
 
 ---
 
@@ -79,6 +79,16 @@ PrimeDictate expects a Whisper ONNX model folder containing:
 - `*-tokens.txt`
 
 The runtime checks managed downloads, installed app-local models under `models\whisper`, and repo-local `models\whisper` folders during development.
+
+### Whisper.net (GGML)
+
+PrimeDictate also supports **Whisper.net GGML** models for larger Whisper variants and hardware acceleration. The compute picker only shows locally supported choices:
+
+- **CPU** is always available.
+- **GPU** is shown when a supported Whisper.net GPU runtime is present and the machine exposes CUDA or Vulkan.
+- **NPU** is shown for supported GGML models with OpenVINO encoder sidecars.
+
+When an older saved setting asks for an unsupported hardware path, PrimeDictate normalizes it at startup. If an installed Whisper.net hardware configuration is available, it prefers that; otherwise it falls back to CPU rather than trying an unsupported provider.
 
 ### Parakeet
 

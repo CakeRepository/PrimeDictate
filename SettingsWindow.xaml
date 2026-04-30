@@ -157,15 +157,12 @@
                                    Text="Compute interface" />
                         <ComboBox Name="ComputeInterfaceComboBox"
                                   Margin="0,6,0,0"
-                                  MinHeight="32">
-                            <ComboBoxItem Content="CPU (most compatible)" Tag="Cpu" />
-                            <ComboBoxItem Content="GPU (DirectML)" Tag="Gpu" />
-                            <ComboBoxItem Content="NPU (DirectML)" Tag="Npu" />
-                        </ComboBox>
-                        <TextBlock Margin="0,8,0,0"
+                                  MinHeight="32"
+                                  SelectionChanged="OnComputeInterfaceChanged" />
+                        <TextBlock Name="ComputeInterfaceDescriptionText"
+                                   Margin="0,8,0,0"
                                    Foreground="{StaticResource TextSecondaryBrush}"
-                                   TextWrapping="Wrap"
-                                   Text="Choose the ONNX execution interface for the selected backend. Availability depends on local runtime/provider support." />
+                                   TextWrapping="Wrap" />
 
                         <TextBlock Margin="0,14,0,0"
                                    FontWeight="SemiBold"
