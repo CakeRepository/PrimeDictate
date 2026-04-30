@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/flowdevs_icon.png" alt="FlowDevs Logo" width="300" />
+  <img src="assets/flowdevs_icon.png" alt="PrimeDictate icon" width="300" />
   <br/>
   <h1>PrimeDictate</h1>
   <a href="https://github.com/CakeRepository/PrimeDictate/actions/workflows/build.yml">
@@ -18,7 +18,7 @@
 
 - **Global hotkey**: Configurable global toggle (default `Ctrl+Shift+Space`) to start/stop recording.
 - **Tray workspace UI**: Open **Workspace** from the tray icon to browse per-session dictation threads and global runtime logs in a clearer, column-based dashboard layout.
-- **AI Prompt Modes (Ollama Integration)**: Automatically rewrite and format your transcripts using a local Ollama instance. Includes dynamic prompt modes (like Bug, Update, and Blog) and injects the active application's context into the LLM for perfectly formatted output.
+- **AI Prompt Modes (Ollama Integration)**: Automatically rewrite and format your transcripts using a local Ollama instance. Includes dynamic prompt modes (like Bug, Update, and Blog) and injects the active application's context into the LLM for application-aware output.
 - **Log signal over noise**: Repeated adjacent log entries are collapsed (for example `(... x12)`) and history is capped to keep memory usage predictable.
 - **Live preview overlay**: While recording, the app periodically re-transcribes the growing buffer with the selected local backend and shows the current hypothesis in a non-activating overlay.
 - **Compact mic overlay**: The default overlay mode keeps a small lower-right microphone visible as a ready/listening indicator. Clicking it temporarily expands the larger transcript panel without changing your saved default mode.
@@ -54,7 +54,7 @@
 
 ## Local transcription backends and model files
 
-PrimeDictate now has a curated backend + model picker during first-run setup and in Settings.
+PrimeDictate includes a curated backend + model picker during first-run setup and in Settings.
 
 ![Model Selection Settings](assets/settings_model.png)
 
@@ -178,7 +178,7 @@ Larger models take longer to download and load. The first transcription after la
 
 ## Public Windows release (installers)
 
-This repo targets **64-bit Windows** only. Maintainers build **MSI packages** with the [WiX Toolset](https://wixtoolset.org/) **through NuGet** (`WixToolset.Sdk`). Only the **[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)** is required—no separate Inno Setup or WiX install.
+Public installers target **64-bit x64 Windows** only. Maintainers build **MSI packages** with the [WiX Toolset](https://wixtoolset.org/) **via NuGet** (`WixToolset.Sdk`). Only the **[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)** is required—no separate Inno Setup or WiX install.
 
 | MSI | When to use |
 |-----|-------------|
@@ -194,16 +194,41 @@ Outputs: `artifacts\installer\`. Version comes from `Directory.Build.props`.
 
 See [installer/README.md](installer/README.md) for details. Redistribute ONNX model files only in compliance with their license/terms.
 
+### Maintainer release commands
+
+Use this from a clean `main` worktree when publishing a new release. Replace `4.3.0` with the next version.
+
+```powershell
+$Version = "4.3.0"
+
+git status --short --branch
+# Update Directory.Build.props to $Version before committing.
+dotnet build -c Release
+
+git add -A
+git commit -m "release: v$Version"
+
+git ls-remote --tags origin "refs/tags/v$Version"
+git tag -a "v$Version" -m "v$Version"
+
+git push origin main
+git push origin "v$Version"
+
+git status --short --branch
+```
+
+If `git ls-remote` prints an existing tag, do not recreate it; choose the correct next version or inspect the existing release first.
+
 ### GitHub Releases and Webflow links
 
 Tagged pushes that match `vX.Y.Z` keep the workflow artifact upload for CI debugging and also publish installer assets to the matching GitHub Release. If the Release does not exist yet, the workflow creates it first. Release downloads come from **GitHub Releases**, not the temporary workflow artifact ZIP. If Azure Key Vault signing secrets are unavailable, the release flow still publishes assets as unsigned builds instead of failing before release upload.
 
 - Release page: `https://github.com/CakeRepository/PrimeDictate/releases/tag/vX.Y.Z`
 - Direct MSI asset: `https://github.com/CakeRepository/PrimeDictate/releases/download/vX.Y.Z/PrimeDictate-Setup-vX.Y.Z.msi`
-- GitHub latest redirect pattern: `https://github.com/CakeRepository/PrimeDictate/releases/latest/download/PrimeDictate-Setup-vX.Y.Z.msi`
+- Latest release page: `https://github.com/CakeRepository/PrimeDictate/releases/latest`
 - Chocolatey package asset: `https://github.com/CakeRepository/PrimeDictate/releases/download/vX.Y.Z/primedictate.X.Y.Z.nupkg`
 
-Because the MSI filename includes the tag, Webflow should either link to the release page or update the direct MSI URL each time a new release tag is published.
+Because the MSI filename includes the tag, Webflow should either link to the release page/latest page or update the direct MSI URL each time a new release tag is published.
 
 ### Chocolatey release alignment
 
@@ -364,7 +389,7 @@ This repository’s application code is provided as in-repo source; follow the l
 
 ## About FlowDevs & The Author
 
-**PrimeDictate** is built by **Justin Trantham**, Co-Founder and Prime Automator at [FlowDevs](https://flowdevs.io). 
+**PrimeDictate** is built by **Justin Trantham**, Co-Founder and Prime Automator at [FlowDevs](https://flowdevs.io).
 
 Founded in 2023, FlowDevs bridges the gap between business goals and scalable tech. We stop you from running your company on spreadsheets by building custom internal tools, client portals, and Power Platform solutions that actually scale. We specialize in workflow automation, integrations, and internal apps for Minnesota businesses.
 

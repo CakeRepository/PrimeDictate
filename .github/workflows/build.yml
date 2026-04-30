@@ -228,7 +228,6 @@ jobs:
           $msis = Get-ChildItem -Path $env:INSTALLER_DIR -Filter *.msi -File -ErrorAction SilentlyContinue
           if (-not $msis -or $msis.Count -eq 0) {
             throw "No MSI files found to sign under $env:INSTALLER_DIR"
-          }
 
           foreach ($msi in $msis) {
             azuresigntool sign `
