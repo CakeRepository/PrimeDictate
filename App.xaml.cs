@@ -69,7 +69,9 @@ public partial class App : System.Windows.Application
         this.historyStore = new TranscriptionHistoryStore();
         this.statsStore = new DictationStatsStore();
         this.settings = this.settingsStore.LoadOrDefault();
-        if (TranscriptionRuntimeSupport.NormalizeSettingsForCurrentMachine(this.settings))
+        var settingsChanged = TranscriptionRuntimeSupport.NormalizeSettingsForCurrentMachine(this.settings);
+        settingsChanged |= NormalizeShortcutSettings(this.settings);
+        if (settingsChanged)
         {
             this.settingsStore.Save(this.settings);
         }
@@ -78,11 +80,6 @@ public partial class App : System.Windows.Application
         this.historyViewModel.Load(historyEntries);
         this.stats = this.statsStore.LoadOrCreate(historyEntries);
         this.UpdateRuntimeStatusUi();
-
-        var configured = this.settings.DictationHotkey.IsValid(out _)
-            ? this.settings.DictationHotkey
-            : HotkeyGesture.Default;
-        this.settings.DictationHotkey = configured;
 
         this.dictationController = new DictationController(
             this.settings.ExclusiveMicAccessWhileDictating,
@@ -99,6 +96,9 @@ public partial class App : System.Windows.Application
             this.settings.OllamaEndpoint,
             this.settings.OllamaModel,
             this.settings.OllamaMode,
+            this.settings.EnableVoiceCommands,
+            this.settings.VoiceStopPhrase,
+            this.settings.VoiceHistoryPhrase,
             this.settings.TranscriptReplacements ?? new List<TranscriptReplacementRule>());
         this.dictationController.RecordingStateChanged += this.OnRecordingStateChanged;
         this.dictationController.ProcessingStateChanged += this.OnProcessingStateChanged;
@@ -107,7 +107,14 @@ public partial class App : System.Windows.Application
         this.dictationController.ThreadTranscriptUpdated += this.OnThreadTranscriptUpdated;
         this.dictationController.TranscriptCommitted += this.OnTranscriptCommitted;
         this.dictationController.AudioLevelUpdated += this.OnAudioLevelUpdated;
-        this.hotkeyListener = new GlobalHotkeyListener(this.dictationController.ToggleRecordingAsync, configured);
+        this.dictationController.HistoryRequested += this.OnHistoryRequested;
+        this.hotkeyListener = new GlobalHotkeyListener(
+            this.dictationController.ToggleRecordingAsync,
+            this.dictationController.StopRecordingAsync,
+            this.ShowHistoryFromHotkeyAsync,
+            this.settings.DictationHotkey,
+            this.settings.StopHotkey,
+            this.settings.HistoryHotkey);
         this.hookTask = this.hotkeyListener.RunAsync();
         AppLog.EntryWritten += this.OnAppLogEntryWritten;
 
@@ -215,6 +222,58 @@ public partial class App : System.Windows.Application
         File.WriteAllText(fullOutputPath, result);
     }
 
+    private static bool NormalizeShortcutSettings(AppSettings settings)
+    {
+        var changed = false;
+
+        if (settings.DictationHotkey is null || !settings.DictationHotkey.IsValid(out _))
+        {
+            settings.DictationHotkey = HotkeyGesture.Default;
+            changed = true;
+        }
+
+        if (settings.StopHotkey is null || !settings.StopHotkey.IsValid(out _) ||
+            AreSameGesture(settings.StopHotkey, settings.DictationHotkey))
+        {
+            settings.StopHotkey = AreSameGesture(HotkeyGesture.DefaultStop, settings.DictationHotkey)
+                ? new HotkeyGesture { KeyCode = SharpHook.Data.KeyCode.VcEnter, Ctrl = true, Shift = false, Alt = true }
+                : HotkeyGesture.DefaultStop;
+            changed = true;
+        }
+
+        if (settings.HistoryHotkey is null || !settings.HistoryHotkey.IsValid(out _) ||
+            AreSameGesture(settings.HistoryHotkey, settings.DictationHotkey) ||
+            AreSameGesture(settings.HistoryHotkey, settings.StopHotkey))
+        {
+            settings.HistoryHotkey = AreSameGesture(HotkeyGesture.DefaultHistory, settings.DictationHotkey) ||
+                AreSameGesture(HotkeyGesture.DefaultHistory, settings.StopHotkey)
+                    ? new HotkeyGesture { KeyCode = SharpHook.Data.KeyCode.VcH, Ctrl = true, Shift = false, Alt = true }
+                    : HotkeyGesture.DefaultHistory;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.VoiceStopPhrase))
+        {
+            settings.VoiceStopPhrase = "potato farmer";
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.VoiceHistoryPhrase) ||
+            string.Equals(settings.VoiceHistoryPhrase.Trim(), settings.VoiceStopPhrase.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            settings.VoiceHistoryPhrase = "show me the money";
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool AreSameGesture(HotkeyGesture left, HotkeyGesture right) =>
+        left.KeyCode == right.KeyCode &&
+        left.Ctrl == right.Ctrl &&
+        left.Shift == right.Shift &&
+        left.Alt == right.Alt;
+
     protected override async void OnExit(ExitEventArgs e)
     {
         if (this.hotkeyListener is not null)
@@ -236,6 +295,7 @@ public partial class App : System.Windows.Application
             this.dictationController.ThreadTranscriptUpdated -= this.OnThreadTranscriptUpdated;
             this.dictationController.TranscriptCommitted -= this.OnTranscriptCommitted;
             this.dictationController.AudioLevelUpdated -= this.OnAudioLevelUpdated;
+            this.dictationController.HistoryRequested -= this.OnHistoryRequested;
             await this.dictationController.DisposeAsync().ConfigureAwait(false);
         }
 
@@ -308,6 +368,12 @@ public partial class App : System.Windows.Application
 
     internal void ShowHistory() => this.ShowHistoryWindow();
 
+    private Task ShowHistoryFromHotkeyAsync()
+    {
+        this.Dispatcher.Invoke(this.ShowHistoryWindow);
+        return Task.CompletedTask;
+    }
+
     private void ShowSettingsWindow(bool isFirstRun)
     {
         if (this.settings is null)
@@ -340,7 +406,13 @@ public partial class App : System.Windows.Application
 
     private void OnHistoryRequested()
     {
-        this.ShowHistoryWindow();
+        if (this.Dispatcher.CheckAccess())
+        {
+            this.ShowHistoryWindow();
+            return;
+        }
+
+        this.Dispatcher.Invoke(this.ShowHistoryWindow);
     }
 
     private void OnSettingsSaved(AppSettings newSettings)
@@ -351,10 +423,14 @@ public partial class App : System.Windows.Application
         }
 
         this.overlayExpandedFromCompact = false;
+        NormalizeShortcutSettings(newSettings);
         this.settings = newSettings;
         this.settingsStore.Save(newSettings);
         this.UpdateRuntimeStatusUi();
-        this.hotkeyListener.UpdateHotkey(newSettings.DictationHotkey);
+        this.hotkeyListener.UpdateHotkeys(
+            newSettings.DictationHotkey,
+            newSettings.StopHotkey,
+            newSettings.HistoryHotkey);
         this.dictationController?.UpdateCaptureOptions(
             newSettings.ExclusiveMicAccessWhileDictating,
             newSettings.SelectedInputDeviceId,
@@ -370,6 +446,9 @@ public partial class App : System.Windows.Application
             newSettings.OllamaEndpoint,
             newSettings.OllamaModel,
             newSettings.OllamaMode,
+            newSettings.EnableVoiceCommands,
+            newSettings.VoiceStopPhrase,
+            newSettings.VoiceHistoryPhrase,
             newSettings.TranscriptReplacements ?? new List<TranscriptReplacementRule>());
         this.UpdateTranscriptionOverlay();
     }

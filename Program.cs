@@ -12,14 +12,28 @@ namespace PrimeDictate;
 internal sealed class GlobalHotkeyListener : IDisposable
 {
     private readonly IGlobalHook hook;
-    private readonly Func<Task> onHotkeyPressedAsync;
+    private readonly Func<Task> onDictationHotkeyPressedAsync;
+    private readonly Func<Task> onStopHotkeyPressedAsync;
+    private readonly Func<Task> onHistoryHotkeyPressedAsync;
     private readonly object configSync = new();
-    private HotkeyGesture hotkey;
+    private HotkeyGesture dictationHotkey;
+    private HotkeyGesture stopHotkey;
+    private HotkeyGesture historyHotkey;
 
-    public GlobalHotkeyListener(Func<Task> onHotkeyPressedAsync, HotkeyGesture hotkey)
+    public GlobalHotkeyListener(
+        Func<Task> onDictationHotkeyPressedAsync,
+        Func<Task> onStopHotkeyPressedAsync,
+        Func<Task> onHistoryHotkeyPressedAsync,
+        HotkeyGesture dictationHotkey,
+        HotkeyGesture stopHotkey,
+        HotkeyGesture historyHotkey)
     {
-        this.onHotkeyPressedAsync = onHotkeyPressedAsync;
-        this.hotkey = hotkey;
+        this.onDictationHotkeyPressedAsync = onDictationHotkeyPressedAsync;
+        this.onStopHotkeyPressedAsync = onStopHotkeyPressedAsync;
+        this.onHistoryHotkeyPressedAsync = onHistoryHotkeyPressedAsync;
+        this.dictationHotkey = dictationHotkey;
+        this.stopHotkey = stopHotkey;
+        this.historyHotkey = historyHotkey;
         this.hook = new SimpleGlobalHook(GlobalHookType.Keyboard);
         this.hook.KeyPressed += this.OnKeyPressed;
     }
@@ -34,7 +48,8 @@ internal sealed class GlobalHotkeyListener : IDisposable
 
     private void OnKeyPressed(object? sender, KeyboardHookEventArgs args)
     {
-        if (!this.IsDictationHotkey(args))
+        var action = this.MatchHotkey(args);
+        if (action is null)
         {
             return;
         }
@@ -45,7 +60,7 @@ internal sealed class GlobalHotkeyListener : IDisposable
         {
             try
             {
-                await this.onHotkeyPressedAsync().ConfigureAwait(false);
+                await action().ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -54,28 +69,49 @@ internal sealed class GlobalHotkeyListener : IDisposable
         });
     }
 
-    public void UpdateHotkey(HotkeyGesture hotkey)
+    public void UpdateHotkeys(HotkeyGesture dictationHotkey, HotkeyGesture stopHotkey, HotkeyGesture historyHotkey)
     {
         lock (this.configSync)
         {
-            this.hotkey = hotkey;
+            this.dictationHotkey = dictationHotkey;
+            this.stopHotkey = stopHotkey;
+            this.historyHotkey = historyHotkey;
         }
     }
 
-    private bool IsDictationHotkey(KeyboardHookEventArgs args)
+    private Func<Task>? MatchHotkey(KeyboardHookEventArgs args)
     {
         var mask = args.RawEvent.Mask;
-        HotkeyGesture currentHotkey;
+        HotkeyGesture currentDictationHotkey;
+        HotkeyGesture currentStopHotkey;
+        HotkeyGesture currentHistoryHotkey;
         lock (this.configSync)
         {
-            currentHotkey = this.hotkey;
+            currentDictationHotkey = this.dictationHotkey;
+            currentStopHotkey = this.stopHotkey;
+            currentHistoryHotkey = this.historyHotkey;
         }
 
-        return args.Data.KeyCode == currentHotkey.KeyCode &&
-            (!currentHotkey.Ctrl || mask.HasCtrl()) &&
-            (!currentHotkey.Shift || mask.HasShift()) &&
-            (!currentHotkey.Alt || mask.HasAlt());
+        if (Matches(args, mask, currentStopHotkey))
+        {
+            return this.onStopHotkeyPressedAsync;
+        }
+
+        if (Matches(args, mask, currentHistoryHotkey))
+        {
+            return this.onHistoryHotkeyPressedAsync;
+        }
+
+        return Matches(args, mask, currentDictationHotkey)
+            ? this.onDictationHotkeyPressedAsync
+            : null;
     }
+
+    private static bool Matches(KeyboardHookEventArgs args, EventMask mask, HotkeyGesture hotkey) =>
+        args.Data.KeyCode == hotkey.KeyCode &&
+        (!hotkey.Ctrl || mask.HasCtrl()) &&
+        (!hotkey.Shift || mask.HasShift()) &&
+        (!hotkey.Alt || mask.HasAlt());
 }
 
 internal sealed class DictationController : IAsyncDisposable
@@ -99,12 +135,18 @@ internal sealed class DictationController : IAsyncDisposable
     private TimeSpan autoCommitSilenceDelay;
     private bool sendEnterAfterCommit;
     private bool returnToStartTargetOnCommit;
+    private bool enableVoiceCommands = true;
+    private string voiceStopPhrase = "potato farmer";
+    private string voiceHistoryPhrase = "show me the money";
 
     private CancellationTokenSource? livePreviewCts;
     private Task? livePreviewTask;
     private Guid? activeThreadId;
     private ForegroundInputTarget? activeInputTarget;
     private int autoCommitRequested;
+    private int emergencyStopRequested;
+    private int voiceStopRequested;
+    private int voiceHistoryRequested;
     private bool enableOllamaPostProcessing;
     private string ollamaEndpoint = "http://localhost:11434";
     private string ollamaModel = "gemma:2b";
@@ -121,6 +163,7 @@ internal sealed class DictationController : IAsyncDisposable
     public event Action<Guid, string>? ThreadTranscriptUpdated;
     public event Action<TranscriptCommittedEvent>? TranscriptCommitted;
     public event Action<double>? AudioLevelUpdated;
+    public event Action? HistoryRequested;
 
     public DictationController(
         bool exclusiveMicAccessWhileDictating = false,
@@ -137,6 +180,9 @@ internal sealed class DictationController : IAsyncDisposable
         string ollamaEndpoint = "http://localhost:11434",
         string ollamaModel = "gemma:2b",
         OllamaMode ollamaMode = OllamaMode.Default,
+        bool enableVoiceCommands = true,
+        string voiceStopPhrase = "potato farmer",
+        string voiceHistoryPhrase = "show me the money",
         IReadOnlyList<TranscriptReplacementRule>? transcriptReplacements = null)
     {
         this.exclusiveMicAccessWhileDictating = exclusiveMicAccessWhileDictating;
@@ -149,6 +195,9 @@ internal sealed class DictationController : IAsyncDisposable
         this.ollamaEndpoint = ollamaEndpoint;
         this.ollamaModel = ollamaModel;
         this.ollamaMode = ollamaMode;
+        this.enableVoiceCommands = enableVoiceCommands;
+        this.voiceStopPhrase = NormalizeVoiceCommandPhrase(voiceStopPhrase);
+        this.voiceHistoryPhrase = NormalizeVoiceCommandPhrase(voiceHistoryPhrase);
         this.ReplaceTranscriptReplacementRules(transcriptReplacements);
         this.textInjectionPipeline.UpdateConfiguration(
             transcriptionBackend,
@@ -184,6 +233,9 @@ internal sealed class DictationController : IAsyncDisposable
         string ollamaEndpoint,
         string ollamaModel,
         OllamaMode ollamaMode,
+        bool enableVoiceCommands,
+        string voiceStopPhrase,
+        string voiceHistoryPhrase,
         IReadOnlyList<TranscriptReplacementRule>? transcriptReplacements = null)
     {
         lock (this.configSync)
@@ -198,6 +250,9 @@ internal sealed class DictationController : IAsyncDisposable
             this.ollamaEndpoint = ollamaEndpoint;
             this.ollamaModel = ollamaModel;
             this.ollamaMode = ollamaMode;
+            this.enableVoiceCommands = enableVoiceCommands;
+            this.voiceStopPhrase = NormalizeVoiceCommandPhrase(voiceStopPhrase);
+            this.voiceHistoryPhrase = NormalizeVoiceCommandPhrase(voiceHistoryPhrase);
             this.ReplaceTranscriptReplacementRules(transcriptReplacements);
         }
 
@@ -230,6 +285,9 @@ internal sealed class DictationController : IAsyncDisposable
                 this.activeThreadId = threadId;
                 this.activeInputTarget = ForegroundInputTarget.Capture();
                 Interlocked.Exchange(ref this.autoCommitRequested, 0);
+                Interlocked.Exchange(ref this.emergencyStopRequested, 0);
+                Interlocked.Exchange(ref this.voiceStopRequested, 0);
+                Interlocked.Exchange(ref this.voiceHistoryRequested, 0);
                 Interlocked.Exchange(ref this.lastSpeechTicksUtc, 0);
                 this.adaptiveNoiseFloorRms = MinSpeechRmsThreshold;
                 this.maxObservedRmsThisSession = 0;
@@ -246,6 +304,27 @@ internal sealed class DictationController : IAsyncDisposable
             }
 
             await this.StopAndCommitRecordingCoreAsync("manual stop").ConfigureAwait(false);
+        }
+        finally
+        {
+            this.toggleGate.Release();
+        }
+    }
+
+    public async Task StopRecordingAsync()
+    {
+        Interlocked.Exchange(ref this.emergencyStopRequested, 1);
+        await this.toggleGate.WaitAsync().ConfigureAwait(false);
+
+        try
+        {
+            if (!this.recorder.IsRecording)
+            {
+                AppLog.Info("Emergency stop requested; no active recording to discard.", this.activeThreadId);
+                return;
+            }
+
+            await this.StopAndDiscardRecordingCoreAsync("emergency stop hotkey").ConfigureAwait(false);
         }
         finally
         {
@@ -293,9 +372,24 @@ internal sealed class DictationController : IAsyncDisposable
                             .TranscribeAsync(snap, cancellationToken, logTranscript: false)
                             .ConfigureAwait(false);
                         lastTranscribedCapturedBytes = capturedBytes;
-                        if (this.activeThreadId is Guid threadId && !string.IsNullOrWhiteSpace(transcript))
+                        var commandMatch = VoiceCommandMatcher.Apply(transcript, this.GetVoiceCommandOptionsSnapshot());
+                        if (this.activeThreadId is Guid threadId &&
+                            (!string.IsNullOrWhiteSpace(commandMatch.CleanedText) ||
+                                commandMatch.StopRequested ||
+                                commandMatch.HistoryRequested))
                         {
-                            this.ThreadTranscriptUpdated?.Invoke(threadId, transcript);
+                            this.ThreadTranscriptUpdated?.Invoke(threadId, commandMatch.CleanedText);
+                        }
+
+                        if (commandMatch.HistoryRequested)
+                        {
+                            this.RequestHistoryFromVoiceCommand();
+                            this.RequestStopFromVoiceCommand();
+                        }
+
+                        if (commandMatch.StopRequested)
+                        {
+                            this.RequestStopFromVoiceCommand();
                         }
                     }
                     catch (OperationCanceledException)
@@ -346,6 +440,49 @@ internal sealed class DictationController : IAsyncDisposable
                 AppLog.Error($"Silence auto-commit failed: {ex.Message}", this.activeThreadId);
             }
         });
+    }
+
+    private void RequestStopFromVoiceCommand()
+    {
+        if (Interlocked.Exchange(ref this.voiceStopRequested, 1) == 1)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref this.emergencyStopRequested, 1);
+        _ = Task.Run(async () =>
+        {
+            await this.toggleGate.WaitAsync().ConfigureAwait(false);
+
+            try
+            {
+                if (!this.recorder.IsRecording)
+                {
+                    return;
+                }
+
+                AppLog.Info("Voice stop command detected.", this.activeThreadId);
+                await this.StopAndDiscardRecordingCoreAsync("voice stop command").ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error($"Voice stop command failed: {ex.Message}", this.activeThreadId);
+            }
+            finally
+            {
+                this.toggleGate.Release();
+            }
+        });
+    }
+
+    private void RequestHistoryFromVoiceCommand()
+    {
+        if (Interlocked.Exchange(ref this.voiceHistoryRequested, 1) == 1)
+        {
+            return;
+        }
+
+        AppLog.Info("Voice history command detected.", this.activeThreadId);
     }
 
     private async Task CommitAfterSilenceAsync()
@@ -406,6 +543,20 @@ internal sealed class DictationController : IAsyncDisposable
         this.livePreviewCts = null;
         this.livePreviewTask = null;
 
+        if (this.IsEmergencyStopRequested())
+        {
+            AppLog.Info("Final transcription skipped because emergency stop was requested.", this.activeThreadId);
+            if (this.activeThreadId is Guid canceledId)
+            {
+                this.ThreadCompleted?.Invoke(canceledId);
+            }
+
+            this.ProcessingStateChanged?.Invoke(false);
+            this.activeThreadId = null;
+            this.activeInputTarget = null;
+            return;
+        }
+
         try
         {
             await this.HandleRecordedAudioAsync(audio, reason).ConfigureAwait(false);
@@ -419,6 +570,50 @@ internal sealed class DictationController : IAsyncDisposable
             this.ProcessingStateChanged?.Invoke(false);
             this.activeThreadId = null;
             this.activeInputTarget = null;
+            if (Interlocked.Exchange(ref this.voiceHistoryRequested, 0) == 1)
+            {
+                this.HistoryRequested?.Invoke();
+            }
+        }
+    }
+
+    private async Task StopAndDiscardRecordingCoreAsync(string reason)
+    {
+        this.livePreviewCts?.Cancel();
+
+        var audio = await this.recorder.StopAsync().ConfigureAwait(false);
+        AppLog.Info(
+            $"Recording discarded ({reason}): {audio.Duration.TotalSeconds:N2}s, {audio.Pcm16KhzMono.Length:N0} bytes PCM.",
+            this.activeThreadId);
+        this.RecordingStateChanged?.Invoke(false);
+
+        if (this.livePreviewTask is { } liveTask)
+        {
+            try
+            {
+                await liveTask.ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                AppLog.Error($"Live preview loop failed during discard: {ex.Message}", this.activeThreadId);
+            }
+        }
+
+        this.livePreviewCts?.Dispose();
+        this.livePreviewCts = null;
+        this.livePreviewTask = null;
+
+        if (this.activeThreadId is Guid completedId)
+        {
+            this.ThreadCompleted?.Invoke(completedId);
+        }
+
+        this.ProcessingStateChanged?.Invoke(false);
+        this.activeThreadId = null;
+        this.activeInputTarget = null;
+        if (Interlocked.Exchange(ref this.voiceHistoryRequested, 0) == 1)
+        {
+            this.HistoryRequested?.Invoke();
         }
     }
 
@@ -475,6 +670,12 @@ internal sealed class DictationController : IAsyncDisposable
             return;
         }
 
+        if (this.IsEmergencyStopRequested())
+        {
+            AppLog.Info("Recorded audio discarded before final transcription because emergency stop was requested.", this.activeThreadId);
+            return;
+        }
+
         var target = this.activeInputTarget;
         if (target is null)
         {
@@ -495,6 +696,26 @@ internal sealed class DictationController : IAsyncDisposable
             finalTranscript = await this.textInjectionPipeline.TranscribeAsync(audio, CancellationToken.None)
                 .ConfigureAwait(false);
             finalTranscript = RemoveTrailingSilenceArtifact(finalTranscript, stopReason);
+            var finalCommandMatch = VoiceCommandMatcher.Apply(finalTranscript, this.GetVoiceCommandOptionsSnapshot());
+            finalTranscript = finalCommandMatch.CleanedText;
+            if (finalCommandMatch.StopRequested)
+            {
+                Interlocked.Exchange(ref this.emergencyStopRequested, 1);
+                AppLog.Info("Voice stop command detected in final transcript; skipped injection.", this.activeThreadId);
+                return;
+            }
+
+            if (finalCommandMatch.HistoryRequested)
+            {
+                this.RequestHistoryFromVoiceCommand();
+            }
+
+            if (this.IsEmergencyStopRequested())
+            {
+                AppLog.Info("Final transcript discarded because emergency stop was requested.", this.activeThreadId);
+                return;
+            }
+
             TranscriptReplacementRule[] replacementSnapshot;
             lock (this.configSync)
             {
@@ -504,6 +725,12 @@ internal sealed class DictationController : IAsyncDisposable
             }
 
             finalTranscript = TranscriptReplacement.Apply(finalTranscript, replacementSnapshot);
+            if (this.IsEmergencyStopRequested())
+            {
+                AppLog.Info("Final transcript discarded before preview update because emergency stop was requested.", this.activeThreadId);
+                return;
+            }
+
             if (this.activeThreadId is Guid threadId && !string.IsNullOrWhiteSpace(finalTranscript))
             {
                 this.ThreadTranscriptUpdated?.Invoke(threadId, finalTranscript);
@@ -549,6 +776,12 @@ internal sealed class DictationController : IAsyncDisposable
                 finalTranscript = ollamaResult.ProcessedText;
                 ollamaSystemPrompt = ollamaResult.SystemPrompt;
 
+                if (this.IsEmergencyStopRequested())
+                {
+                    AppLog.Info("Processed transcript discarded because emergency stop was requested.", this.activeThreadId);
+                    return;
+                }
+
                 if (this.activeThreadId is Guid updatedId && !string.IsNullOrWhiteSpace(finalTranscript))
                 {
                     this.ThreadTranscriptUpdated?.Invoke(updatedId, finalTranscript);
@@ -561,6 +794,12 @@ internal sealed class DictationController : IAsyncDisposable
             {
                 shouldSendEnter = this.sendEnterAfterCommit;
                 shouldReturnToStartTarget = this.returnToStartTargetOnCommit;
+            }
+
+            if (this.IsEmergencyStopRequested())
+            {
+                AppLog.Info("Transcript injection skipped because emergency stop was requested.", this.activeThreadId);
+                return;
             }
 
             if (target is not null && !target.IsStillForeground())
@@ -701,6 +940,25 @@ internal sealed class DictationController : IAsyncDisposable
             .Select(r => new TranscriptReplacementRule { Find = r.Find, Replace = r.Replace })
             .ToList();
     }
+
+    private VoiceCommandOptions GetVoiceCommandOptionsSnapshot()
+    {
+        lock (this.configSync)
+        {
+            return new VoiceCommandOptions(
+                this.enableVoiceCommands,
+                this.voiceStopPhrase,
+                this.voiceHistoryPhrase);
+        }
+    }
+
+    private bool IsEmergencyStopRequested() =>
+        Interlocked.CompareExchange(ref this.emergencyStopRequested, 0, 0) == 1;
+
+    private static string NormalizeVoiceCommandPhrase(string? phrase) =>
+        string.IsNullOrWhiteSpace(phrase)
+            ? string.Empty
+            : phrase.Trim();
 
     private void OnRecorderAudioLevelUpdated(double rms)
     {

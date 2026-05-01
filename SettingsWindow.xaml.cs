@@ -14,13 +14,18 @@ namespace PrimeDictate;
 
 internal partial class SettingsWindow : Window
 {
+    private enum HotkeyCaptureTarget
+    {
+        Dictation,
+        Stop,
+        History
+    }
+
     private sealed record BackendChoice(TranscriptionBackendKind Kind, string Label, string Description);
-    private sealed record HotkeyPrimaryOption(string Label, KeyCode KeyCode);
     private sealed record InputDeviceOption(string? DeviceId, string Label);
     private sealed record StatsDayBar(string Label, long Words, double BarHeight, MediaBrush Fill);
     private sealed record AchievementDisplay(string Title, string Detail, string Status, MediaBrush Accent);
 
-    private static readonly IReadOnlyList<HotkeyPrimaryOption> PrimaryKeyOptions = BuildPrimaryKeyOptions();
     private static readonly IReadOnlyList<BackendChoice> AllBackendChoices =
     [
         new(
@@ -50,7 +55,10 @@ internal partial class SettingsWindow : Window
     private bool suppressBackendChoiceChanged;
     private bool suppressComputeChoiceChanged;
     private bool suppressModelPathTextChanged;
-    private HotkeyGesture currentHotkey;
+    private HotkeyCaptureTarget? hotkeyCaptureTarget;
+    private HotkeyGesture currentDictationHotkey;
+    private HotkeyGesture currentStopHotkey;
+    private HotkeyGesture currentHistoryHotkey;
     private readonly bool isFirstRun;
     private readonly bool isOverlaySticky;
     private readonly IReadOnlyList<BackendChoice> availableBackendChoices;
@@ -63,20 +71,19 @@ internal partial class SettingsWindow : Window
         InitializeComponent();
         this.isFirstRun = isFirstRun;
         this.isOverlaySticky = settings.IsOverlaySticky;
-        this.currentHotkey = settings.DictationHotkey;
+        this.currentDictationHotkey = settings.DictationHotkey;
+        this.currentStopHotkey = settings.StopHotkey;
+        this.currentHistoryHotkey = settings.HistoryHotkey;
         this.currentBackend = settings.TranscriptionBackend;
         this.availableBackendChoices = GetAvailableBackendChoices(settings.TranscriptionBackend);
 
-        this.PrimaryKeyComboBox.ItemsSource = PrimaryKeyOptions;
-        this.PrimaryKeyComboBox.DisplayMemberPath = nameof(HotkeyPrimaryOption.Label);
         this.InputDeviceComboBox.DisplayMemberPath = nameof(InputDeviceOption.Label);
         this.ModelBackendComboBox.ItemsSource = this.availableBackendChoices;
         this.ModelBackendComboBox.DisplayMemberPath = nameof(BackendChoice.Label);
         this.ModelChoiceComboBox.DisplayMemberPath = nameof(WhisperModelOption.DisplayName);
         this.ComputeInterfaceComboBox.DisplayMemberPath = nameof(TranscriptionComputeChoice.Label);
 
-        this.ApplyHotkeyToBuilder(this.currentHotkey);
-        this.HotkeyValueText.Text = this.currentHotkey.ToString();
+        this.UpdateHotkeyLabels();
         this.TrayBehaviorComboBox.SelectedIndex = settings.TrayClickBehavior == TrayClickBehavior.SingleClickOpensSettings ? 0 : 1;
         this.ExclusiveMicAccessCheckBox.IsChecked = settings.ExclusiveMicAccessWhileDictating;
         this.InitializeInputDeviceOptions(settings.SelectedInputDeviceId);
@@ -86,6 +93,9 @@ internal partial class SettingsWindow : Window
         this.ReturnToStartTargetCheckBox.IsChecked = settings.ReturnToStartTargetOnCommit;
         this.PlayAudioCuesCheckBox.IsChecked = settings.PlayAudioCues;
         this.OverlayModeComboBox.SelectedIndex = settings.OverlayMode == OverlayMode.FullPanel ? 1 : 0;
+        this.EnableVoiceCommandsCheckBox.IsChecked = settings.EnableVoiceCommands;
+        this.VoiceStopPhraseTextBox.Text = settings.VoiceStopPhrase;
+        this.VoiceHistoryPhraseTextBox.Text = settings.VoiceHistoryPhrase;
         this.EnableOllamaCheckBox.IsChecked = settings.EnableOllamaPostProcessing;
         this.OllamaEndpointTextBox.Text = settings.OllamaEndpoint;
         this.OllamaModelTextBox.Text = settings.OllamaModel;
@@ -119,8 +129,10 @@ internal partial class SettingsWindow : Window
         this.WelcomeTab.Header = isFirstRun ? "Welcome" : "Overview";
         this.HeaderText.Text = isFirstRun ? "PrimeDictate first-run setup" : "PrimeDictate settings";
         this.WelcomeFooterText.Text = isFirstRun
-            ? "Work through the tabs from left to right. When you finish, PrimeDictate is ready to dictate into Windows apps."
+            ? "Choose a model, confirm your shortcuts, and PrimeDictate is ready to dictate into Windows apps."
             : "You can switch models or tweak dictation behavior here whenever your workflow changes.";
+        this.ReplacementsTab.Visibility = isFirstRun ? Visibility.Collapsed : Visibility.Visible;
+        this.ImpactTab.Visibility = isFirstRun ? Visibility.Collapsed : Visibility.Visible;
         this.HistoryButton.Visibility = isFirstRun ? Visibility.Collapsed : Visibility.Visible;
         this.CancelButton.Visibility = isFirstRun ? Visibility.Collapsed : Visibility.Visible;
         this.BackButton.Visibility = isFirstRun ? Visibility.Visible : Visibility.Collapsed;
@@ -342,9 +354,17 @@ internal partial class SettingsWindow : Window
 
     private void OnCaptureHotkeyClick(object sender, RoutedEventArgs e)
     {
+        if (sender is not System.Windows.Controls.Button { Tag: string tag } ||
+            !Enum.TryParse<HotkeyCaptureTarget>(tag, out var target))
+        {
+            return;
+        }
+
+        this.hotkeyCaptureTarget = target;
         this.isCapturingHotkey = true;
-        this.CaptureButton.Content = "Press keys...";
-        this.HotkeyHintText.Text = "Press the desired key combination now.";
+        this.ResetCaptureButtonText();
+        ((System.Windows.Controls.Button)sender).Content = "Press...";
+        this.HotkeyHintText.Text = $"Press the new {GetHotkeyTargetLabel(target)} shortcut.";
     }
 
     private void OnWindowPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -358,7 +378,7 @@ internal partial class SettingsWindow : Window
         var candidate = BuildCandidateHotkey(e);
         if (candidate is null)
         {
-            this.HotkeyHintText.Text = "Unsupported key. Try letters, digits, Space, or F1-F12.";
+            this.HotkeyHintText.Text = "Unsupported key. Try letters, digits, Space, Enter, Esc, or F1-F12.";
             return;
         }
 
@@ -368,11 +388,23 @@ internal partial class SettingsWindow : Window
             return;
         }
 
-        this.currentHotkey = candidate;
-        this.ApplyHotkeyToBuilder(candidate);
-        this.HotkeyValueText.Text = candidate.ToString();
-        this.HotkeyHintText.Text = "Hotkey captured.";
-        this.CaptureButton.Content = "Capture hotkey";
+        switch (this.hotkeyCaptureTarget)
+        {
+            case HotkeyCaptureTarget.Stop:
+                this.currentStopHotkey = candidate;
+                break;
+            case HotkeyCaptureTarget.History:
+                this.currentHistoryHotkey = candidate;
+                break;
+            default:
+                this.currentDictationHotkey = candidate;
+                break;
+        }
+
+        this.UpdateHotkeyLabels();
+        this.HotkeyHintText.Text = $"{GetHotkeyTargetLabel(this.hotkeyCaptureTarget ?? HotkeyCaptureTarget.Dictation)} shortcut captured.";
+        this.ResetCaptureButtonText();
+        this.hotkeyCaptureTarget = null;
         this.isCapturingHotkey = false;
     }
 
@@ -882,11 +914,6 @@ internal partial class SettingsWindow : Window
                 return;
             }
 
-            if (this.SetupTabControl.SelectedIndex < this.SetupTabControl.Items.Count - 1)
-            {
-                this.SetupTabControl.SelectedIndex++;
-                return;
-            }
         }
 
         if (!this.TryBuildSettings(out var settings))
@@ -924,18 +951,6 @@ internal partial class SettingsWindow : Window
     private void OnHistoryClick(object sender, RoutedEventArgs e)
     {
         this.HistoryRequested?.Invoke();
-    }
-
-    private void OnHotkeyBuilderChanged(object sender, RoutedEventArgs e)
-    {
-        if (this.isCapturingHotkey)
-        {
-            return;
-        }
-
-        var candidate = this.BuildHotkeyFromBuilder();
-        this.currentHotkey = candidate;
-        this.HotkeyValueText.Text = candidate.ToString();
     }
 
     private void OnModelBackendChanged(object sender, SelectionChangedEventArgs e)
@@ -985,7 +1000,7 @@ internal partial class SettingsWindow : Window
 
         if (!this.isFirstRun)
         {
-            this.HeaderSubtextText.Text = "Manage your local model, hotkey, and dictation behavior.";
+            this.HeaderSubtextText.Text = "Manage your local model, shortcuts, and dictation behavior.";
             this.BackButton.Visibility = Visibility.Collapsed;
             this.CancelButton.Visibility = Visibility.Visible;
             this.HistoryButton.Visibility = Visibility.Visible;
@@ -994,23 +1009,21 @@ internal partial class SettingsWindow : Window
             return;
         }
 
-        var stepIndex = Math.Clamp(this.SetupTabControl.SelectedIndex, 0, this.SetupTabControl.Items.Count - 1);
+        var stepIndex = Math.Clamp(this.SetupTabControl.SelectedIndex, 0, 2);
         var stepNumber = stepIndex + 1;
         var stepLabel = stepIndex switch
         {
             0 => "Welcome",
             1 => "Choose your model",
-            2 => "Tune dictation behavior",
-            3 => "Configure replacements",
-            _ => "Review impact stats"
+            _ => "Confirm shortcuts"
         };
 
-        this.HeaderSubtextText.Text = $"Step {stepNumber} of {this.SetupTabControl.Items.Count}: {stepLabel}";
+        this.HeaderSubtextText.Text = $"Step {stepNumber} of 3: {stepLabel}";
         this.BackButton.Visibility = Visibility.Visible;
         this.BackButton.IsEnabled = stepIndex > 0 && this.modelDownloadCts is null;
         this.CancelButton.Visibility = Visibility.Collapsed;
         this.HistoryButton.Visibility = Visibility.Collapsed;
-        this.SaveButton.Content = stepIndex == this.SetupTabControl.Items.Count - 1 ? "Finish" : "Next";
+        this.SaveButton.Content = ReferenceEquals(this.SetupTabControl.SelectedItem, this.PreferencesTab) ? "Finish" : "Next";
         this.SaveButton.IsEnabled = this.modelDownloadCts is null;
     }
 
@@ -1373,10 +1386,24 @@ internal partial class SettingsWindow : Window
     {
         settings = null!;
 
-        var candidate = this.BuildHotkeyFromBuilder();
-        if (!candidate.IsValid(out var hotkeyError))
+        if (!ValidateShortcut(this.currentDictationHotkey, "Start / stop dictation", out var hotkeyError) ||
+            !ValidateShortcut(this.currentStopHotkey, "Emergency stop", out hotkeyError) ||
+            !ValidateShortcut(this.currentHistoryHotkey, "Open history", out hotkeyError))
         {
-            System.Windows.MessageBox.Show(this, hotkeyError, "Invalid hotkey", MessageBoxButton.OK, MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(this, hotkeyError, "Invalid shortcut", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+
+        if (AreSameGesture(this.currentDictationHotkey, this.currentStopHotkey) ||
+            AreSameGesture(this.currentDictationHotkey, this.currentHistoryHotkey) ||
+            AreSameGesture(this.currentStopHotkey, this.currentHistoryHotkey))
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                "Each keyboard shortcut must use a different key combination.",
+                "Duplicate shortcuts",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
             return false;
         }
 
@@ -1436,7 +1463,34 @@ internal partial class SettingsWindow : Window
 
         var selectedBehavior = ((ComboBoxItem)this.TrayBehaviorComboBox.SelectedItem).Tag?.ToString();
         var selectedOverlayMode = ((ComboBoxItem)this.OverlayModeComboBox.SelectedItem).Tag?.ToString();
-        this.currentHotkey = candidate;
+        var enableVoiceCommands = this.EnableVoiceCommandsCheckBox.IsChecked == true;
+        var voiceStopPhrase = this.VoiceStopPhraseTextBox.Text.Trim();
+        var voiceHistoryPhrase = this.VoiceHistoryPhraseTextBox.Text.Trim();
+        if (enableVoiceCommands &&
+            string.IsNullOrWhiteSpace(voiceStopPhrase) &&
+            string.IsNullOrWhiteSpace(voiceHistoryPhrase))
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                "Voice commands need at least one phrase.",
+                "Voice command phrase required",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(voiceStopPhrase) &&
+            !string.IsNullOrWhiteSpace(voiceHistoryPhrase) &&
+            string.Equals(voiceStopPhrase, voiceHistoryPhrase, StringComparison.OrdinalIgnoreCase))
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                "Use different phrases for Stop and History voice commands.",
+                "Duplicate voice commands",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return false;
+        }
 
         var selectedOllamaModeStr = ((ComboBoxItem)this.OllamaModeComboBox.SelectedItem)?.Tag?.ToString() ?? "Default";
         if (!Enum.TryParse<OllamaMode>(selectedOllamaModeStr, out var selectedOllamaMode))
@@ -1447,7 +1501,12 @@ internal partial class SettingsWindow : Window
         settings = new AppSettings
         {
             FirstRunCompleted = true,
-            DictationHotkey = this.currentHotkey,
+            DictationHotkey = this.currentDictationHotkey,
+            StopHotkey = this.currentStopHotkey,
+            HistoryHotkey = this.currentHistoryHotkey,
+            EnableVoiceCommands = enableVoiceCommands,
+            VoiceStopPhrase = string.IsNullOrWhiteSpace(voiceStopPhrase) ? "potato farmer" : voiceStopPhrase,
+            VoiceHistoryPhrase = string.IsNullOrWhiteSpace(voiceHistoryPhrase) ? "show me the money" : voiceHistoryPhrase,
             TrayClickBehavior = selectedBehavior == "Single"
                 ? TrayClickBehavior.SingleClickOpensSettings
                 : TrayClickBehavior.DoubleClickOpensSettings,
@@ -1479,6 +1538,24 @@ internal partial class SettingsWindow : Window
 
         return true;
     }
+
+    private static bool ValidateShortcut(HotkeyGesture hotkey, string label, out string error)
+    {
+        if (hotkey.IsValid(out var validationError))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        error = $"{label}: {validationError}";
+        return false;
+    }
+
+    private static bool AreSameGesture(HotkeyGesture left, HotkeyGesture right) =>
+        left.KeyCode == right.KeyCode &&
+        left.Ctrl == right.Ctrl &&
+        left.Shift == right.Shift &&
+        left.Alt == right.Alt;
 
     private TranscriptionComputeInterface GetSelectedComputeInterface()
     {
@@ -1933,55 +2010,27 @@ internal partial class SettingsWindow : Window
         };
     }
 
-    private HotkeyGesture BuildHotkeyFromBuilder()
+    private void UpdateHotkeyLabels()
     {
-        var selectedOption = this.PrimaryKeyComboBox.SelectedItem as HotkeyPrimaryOption;
-        var primaryKey = selectedOption?.KeyCode ?? KeyCode.VcSpace;
+        this.DictationHotkeyValueText.Text = this.currentDictationHotkey.ToString();
+        this.StopHotkeyValueText.Text = this.currentStopHotkey.ToString();
+        this.HistoryHotkeyValueText.Text = this.currentHistoryHotkey.ToString();
+    }
 
-        return new HotkeyGesture
+    private void ResetCaptureButtonText()
+    {
+        this.CaptureDictationHotkeyButton.Content = "Change";
+        this.CaptureStopHotkeyButton.Content = "Change";
+        this.CaptureHistoryHotkeyButton.Content = "Change";
+    }
+
+    private static string GetHotkeyTargetLabel(HotkeyCaptureTarget target) =>
+        target switch
         {
-            KeyCode = primaryKey,
-            Ctrl = this.CtrlModifierCheckBox.IsChecked == true,
-            Shift = this.ShiftModifierCheckBox.IsChecked == true,
-            Alt = this.AltModifierCheckBox.IsChecked == true
+            HotkeyCaptureTarget.Stop => "emergency stop",
+            HotkeyCaptureTarget.History => "history",
+            _ => "start / stop"
         };
-    }
-
-    private void ApplyHotkeyToBuilder(HotkeyGesture hotkey)
-    {
-        this.CtrlModifierCheckBox.IsChecked = hotkey.Ctrl;
-        this.ShiftModifierCheckBox.IsChecked = hotkey.Shift;
-        this.AltModifierCheckBox.IsChecked = hotkey.Alt;
-        this.PrimaryKeyComboBox.SelectedItem = PrimaryKeyOptions.FirstOrDefault(option => option.KeyCode == hotkey.KeyCode);
-    }
-
-    private static IReadOnlyList<HotkeyPrimaryOption> BuildPrimaryKeyOptions()
-    {
-        var options = new List<HotkeyPrimaryOption>
-        {
-            new("Space", KeyCode.VcSpace)
-        };
-
-        for (var c = 'A'; c <= 'Z'; c++)
-        {
-            var keyCode = Enum.Parse<KeyCode>($"Vc{c}");
-            options.Add(new HotkeyPrimaryOption(c.ToString(), keyCode));
-        }
-
-        for (var i = 0; i <= 9; i++)
-        {
-            var keyCode = Enum.Parse<KeyCode>($"Vc{i}");
-            options.Add(new HotkeyPrimaryOption(i.ToString(), keyCode));
-        }
-
-        for (var i = 1; i <= 12; i++)
-        {
-            var keyCode = Enum.Parse<KeyCode>($"VcF{i}");
-            options.Add(new HotkeyPrimaryOption($"F{i}", keyCode));
-        }
-
-        return options;
-    }
 
     private static bool TryMapWpfKeyToSharpHook(Key key, out KeyCode keyCode)
     {
@@ -2008,6 +2057,18 @@ internal partial class SettingsWindow : Window
         if (key == Key.Space)
         {
             keyCode = KeyCode.VcSpace;
+            return true;
+        }
+
+        if (key == Key.Return)
+        {
+            keyCode = KeyCode.VcEnter;
+            return true;
+        }
+
+        if (key == Key.Escape)
+        {
+            keyCode = KeyCode.VcEscape;
             return true;
         }
 

@@ -16,7 +16,8 @@
 
 ## Features
 
-- **Global hotkey**: Configurable global toggle (default `Ctrl+Shift+Space`) to start/stop recording.
+- **Global hotkeys**: Configurable global shortcuts for start/stop toggle (default `Ctrl+Shift+Space`), emergency stop/discard (default `Ctrl+Shift+Enter`), and transcript history (default `Ctrl+Shift+H`).
+- **Voice commands**: Optional phrases can be detected while dictating. Defaults are `potato farmer` to discard the active capture and `show me the money` to open history; command phrases are removed before final text injection.
 - **Tray workspace UI**: Open **Workspace** from the tray icon to browse per-session dictation threads and global runtime logs in a clearer, column-based dashboard layout.
 - **AI Prompt Modes (Ollama Integration)**: Automatically rewrite and format your transcripts using a local Ollama instance. Includes dynamic prompt modes (like Bug, Update, and Blog) and injects the active application's context into the LLM for application-aware output.
 - **Log signal over noise**: Repeated adjacent log entries are collapsed (for example `(... x12)`) and history is capped to keep memory usage predictable.
@@ -28,7 +29,7 @@
 - **Transcript history**: Every committed transcript is saved to local history so you can review past dictations, recover text sent to the wrong app, and copy transcript text (with or without metadata).
 - **Impact stats and achievements**: Successful dictations update local-only productivity stats, including words typed, estimated net time saved, average speaking WPM, last-14-day bars, and milestone notifications.
 - **History filters and detail view**: History includes a filter dropdown (**All**, **Injected**, **NotInjected**) plus an expanded detail pane for full transcript and target metadata.
-- **History entry points**: Open history from the tray menu, from the settings window, or from the workspace toolbar.
+- **History entry points**: Open history from the tray menu, the history hotkey, voice command, the settings window, or the workspace toolbar.
 - **Final-only target typing**: The target editor is not mutated while recording. Live corrections stay in the overlay so code editors and IntelliSense are not fighting backspace/retype updates.
 - **Coding mode**: Optional setting sends an Enter key immediately after a successful transcript commit.
 - **Foreground guard**: The foreground window is captured when recording starts; by default PrimeDictate still skips injection if focus changes before the transcript is ready.
@@ -196,10 +197,10 @@ See [installer/README.md](installer/README.md) for details. Redistribute ONNX mo
 
 ### Maintainer release commands
 
-Use this from a clean `main` worktree when publishing a new release. Replace `4.3.0` with the next version.
+Use this from a clean `main` worktree when publishing a new release. Replace `4.3.1` with the next version.
 
 ```powershell
-$Version = "4.3.0"
+$Version = "4.3.1"
 
 git status --short --branch
 # Update Directory.Build.props to $Version before committing.
@@ -261,7 +262,7 @@ PrimeDictate now runs as a **WPF tray app** (no console window in normal use):
 - **Tray shell**: Notification-area icon with **Open Workspace**, **Settings**, and **Exit** menu items.
 - **Tray status colors**: **Ready = Blue**, **Recording = Red**, **Processing = Green**, **Error = Yellow**. Tooltip text follows app state (`Ready`, `Listening`, `Processing transcript`, `Error`).
 - **First launch**: If `%LocalAppData%\PrimeDictate\settings.json` is missing or incomplete, a guided setup window appears with **Welcome**, **Model**, **Dictation**, **Replacements**, and **Impact** tabs.
-- **Configurable hotkey**: Global hotkey is loaded from saved settings and applied to `GlobalHotkeyListener` at startup (default remains `Ctrl+Shift+Space` until changed).
+- **Configurable shortcuts**: Global toggle, emergency stop, and history shortcuts are loaded from saved settings and applied to `GlobalHotkeyListener` at startup. Voice command phrases are configurable from the same simplified Shortcuts tab.
 - **Backend picker + download**: Setup and Settings include curated Whisper, Parakeet, and Moonshine model options, local download progress, and a manual browse fallback.
 - **Experimental ARM64 QNN path**: Native `win-arm64` builds can expose an experimental Qualcomm QNN backend that drives Moonshine through ONNX Runtime with explicit QNN-versus-CPU diagnostics.
 - **Runtime model switching**: Changing the selected backend or model causes the next transcription session to reload the correct engine automatically.
@@ -289,7 +290,7 @@ cd path\to\PrimeDictate
 dotnet run
 ```
 
-The app starts in the tray. On first launch, complete setup, then focus another application and use your configured hotkey to start dictation. A live transcript appears in the overlay while you speak. PrimeDictate commits after the configured silence delay, or when you press the hotkey again.
+The app starts in the tray. On first launch, complete setup, then focus another application and use your configured hotkey to start dictation. A live transcript appears in the overlay while you speak. PrimeDictate commits after the configured silence delay or when you press the start/stop toggle again. The emergency stop shortcut and stop phrase discard the active capture without typing text.
 
 **Note:** Stopping a running `dotnet run` (or any running `PrimeDictate.exe`) may be required before `dotnet build` can replace `bin\...\PrimeDictate.exe` on Windows (file lock on the apphost).
 
@@ -311,7 +312,7 @@ The app starts in the tray. On first launch, complete setup, then focus another 
 | Mechanism | Purpose |
 |-----------|---------|
 | `--enable-launch-at-login` / `--disable-launch-at-login` | Command line switches that add or remove the Windows Run entry for PrimeDictate. Machine-wide entries require an elevated shell to disable. |
-| User settings + first-run | Stored at `%LocalAppData%\PrimeDictate\settings.json` with `FirstRunCompleted`, dictation hotkey, selected backend, selected model id, resolved model path, optional exclusive mic capture toggle, overlay style, silence auto-commit delay, return-to-original-target toggle, audio cue toggle, overlay placement, coding-mode Enter toggle, and baseline typing speed for impact estimates. |
+| User settings + first-run | Stored at `%LocalAppData%\PrimeDictate\settings.json` with `FirstRunCompleted`, dictation/stop/history hotkeys, optional voice command phrases, selected backend, selected model id, resolved model path, optional exclusive mic capture toggle, overlay style, silence auto-commit delay, return-to-original-target toggle, audio cue toggle, overlay placement, coding-mode Enter toggle, and baseline typing speed for impact estimates. |
 | `PRIMEDICTATE_QNN_*` env vars | Maintainer and validation controls for the experimental Qualcomm QNN backend, including strict no-CPU-fallback mode, context caching, and optional QNN profiling output. |
 
 ![Dictation Settings](assets/settings_dictation.png)
@@ -323,7 +324,7 @@ The app starts in the tray. On first launch, complete setup, then focus another 
 
 | Area | Technology |
 |------|------------|
-| Hotkey | SharpHook `SimpleGlobalHook`, keyboard only; gesture loaded from settings and matched on `KeyPressed`. |
+| Hotkey | SharpHook `SimpleGlobalHook`, keyboard only; toggle, emergency stop, and history gestures are loaded from settings and matched on `KeyPressed`. |
 | Capture | NAudio `WasapiCapture` + `MediaFoundationResampler` to 16 kHz mono PCM. |
 | Live preview | `DictationController.LivePreviewLoopAsync` snapshots the growing PCM buffer, re-runs the selected local backend for the overlay, and watches recent RMS level for silence. |
 | Transcription | `TranscriptionEngineHost` selects and owns the active engine. Whisper, Parakeet, and Moonshine use ONNX models through sherpa-onnx `OfflineRecognizer`. The experimental Qualcomm backend drives Moonshine stages directly with ONNX Runtime and can attempt strict QNN HTP execution on native Windows ARM64. |

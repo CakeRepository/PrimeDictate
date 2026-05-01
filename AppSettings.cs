@@ -13,6 +13,16 @@ internal sealed class AppSettings
 
     public HotkeyGesture DictationHotkey { get; set; } = HotkeyGesture.Default;
 
+    public HotkeyGesture StopHotkey { get; set; } = HotkeyGesture.DefaultStop;
+
+    public HotkeyGesture HistoryHotkey { get; set; } = HotkeyGesture.DefaultHistory;
+
+    public bool EnableVoiceCommands { get; set; } = true;
+
+    public string VoiceStopPhrase { get; set; } = "potato farmer";
+
+    public string VoiceHistoryPhrase { get; set; } = "show me the money";
+
     public TrayClickBehavior TrayClickBehavior { get; set; } = TrayClickBehavior.DoubleClickOpensSettings;
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -64,6 +74,11 @@ internal sealed class AppSettings
     {
         FirstRunCompleted = false,
         DictationHotkey = HotkeyGesture.Default,
+        StopHotkey = HotkeyGesture.DefaultStop,
+        HistoryHotkey = HotkeyGesture.DefaultHistory,
+        EnableVoiceCommands = true,
+        VoiceStopPhrase = "potato farmer",
+        VoiceHistoryPhrase = "show me the money",
         TrayClickBehavior = TrayClickBehavior.DoubleClickOpensSettings,
         TranscriptionBackend = TranscriptionBackendKind.Whisper,
         TranscriptionComputeInterface = TranscriptionComputeInterface.Cpu,
@@ -143,6 +158,22 @@ internal sealed class HotkeyGesture
         Alt = false
     };
 
+    public static HotkeyGesture DefaultStop => new()
+    {
+        KeyCode = KeyCode.VcEnter,
+        Ctrl = true,
+        Shift = true,
+        Alt = false
+    };
+
+    public static HotkeyGesture DefaultHistory => new()
+    {
+        KeyCode = KeyCode.VcH,
+        Ctrl = true,
+        Shift = true,
+        Alt = false
+    };
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public KeyCode KeyCode { get; set; }
 
@@ -197,6 +228,8 @@ internal sealed class HotkeyGesture
             _ => this.KeyCode switch
             {
                 KeyCode.VcSpace => "Space",
+                KeyCode.VcEnter => "Enter",
+                KeyCode.VcEscape => "Esc",
                 _ => this.KeyCode.ToString().Replace("Vc", string.Empty)
             }
         });
