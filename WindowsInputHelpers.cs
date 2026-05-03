@@ -10,7 +10,8 @@ internal sealed record ForegroundInputTarget(
     IntPtr WindowHandle,
     IntPtr FocusedWindowHandle,
     uint ProcessId,
-    string? Title)
+    string? Title,
+    string? ProcessName)
 {
     public string DisplayName =>
         string.IsNullOrWhiteSpace(this.Title)
@@ -34,7 +35,12 @@ internal sealed record ForegroundInputTarget(
         }
 
         _ = NativeMethods.GetWindowThreadProcessId(handle, out var processId);
-        return new ForegroundInputTarget(handle, GetFocusedWindow(handle), processId, GetWindowTitle(handle));
+        return new ForegroundInputTarget(
+            handle,
+            GetFocusedWindow(handle),
+            processId,
+            GetWindowTitle(handle),
+            GetProcessName(processId));
     }
 
     public bool TryInjectTextDirectly(string text)
@@ -81,6 +87,24 @@ internal sealed record ForegroundInputTarget(
         return NativeMethods.GetWindowText(handle, title, title.Capacity) > 0
             ? title.ToString()
             : null;
+    }
+
+    private static string? GetProcessName(uint processId)
+    {
+        if (processId > int.MaxValue)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            return string.IsNullOrWhiteSpace(process.ProcessName) ? null : process.ProcessName;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
     }
 }
 

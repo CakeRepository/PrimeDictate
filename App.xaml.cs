@@ -99,6 +99,7 @@ public partial class App : System.Windows.Application
             this.settings.EnableVoiceCommands,
             this.settings.VoiceStopPhrase,
             this.settings.VoiceHistoryPhrase,
+            this.settings.VoiceShellCommands ?? new List<VoiceShellCommand>(),
             this.settings.TranscriptReplacements ?? new List<TranscriptReplacementRule>());
         this.dictationController.RecordingStateChanged += this.OnRecordingStateChanged;
         this.dictationController.ProcessingStateChanged += this.OnProcessingStateChanged;
@@ -449,6 +450,7 @@ public partial class App : System.Windows.Application
             newSettings.EnableVoiceCommands,
             newSettings.VoiceStopPhrase,
             newSettings.VoiceHistoryPhrase,
+            newSettings.VoiceShellCommands ?? new List<VoiceShellCommand>(),
             newSettings.TranscriptReplacements ?? new List<TranscriptReplacementRule>());
         this.UpdateTranscriptionOverlay();
     }
@@ -741,6 +743,8 @@ public partial class App : System.Windows.Application
             Transcript: commit.Transcript,
             DeliveryStatus: commit.DeliveryStatus,
             TargetDisplayName: commit.TargetDisplayName,
+            TargetAppName: commit.TargetAppName,
+            TargetWindowTitle: commit.TargetWindowTitle,
             Error: commit.Error,
             AudioDurationSeconds: commit.AudioDuration.TotalSeconds,
             SendEnterAfterCommit: commit.SendEnterAfterCommit,

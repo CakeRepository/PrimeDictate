@@ -119,6 +119,8 @@ internal sealed class DictationController : IAsyncDisposable
     private static readonly TimeSpan LiveTranscribeInterval = TimeSpan.FromMilliseconds(1_500);
     private static readonly TimeSpan LiveMinAudio = TimeSpan.FromSeconds(0.55);
     private static readonly TimeSpan LivePreviewMaxAudio = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan VoiceShellTypeTargetWait = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan VoiceShellTypePollInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan SilenceProbeInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan RecentSpeechWindow = TimeSpan.FromMilliseconds(450);
     private const double MinSpeechRmsThreshold = 0.0018;
@@ -138,6 +140,7 @@ internal sealed class DictationController : IAsyncDisposable
     private bool enableVoiceCommands = true;
     private string voiceStopPhrase = "potato farmer";
     private string voiceHistoryPhrase = "show me the money";
+    private List<VoiceShellCommand> voiceShellCommands = new();
 
     private CancellationTokenSource? livePreviewCts;
     private Task? livePreviewTask;
@@ -183,6 +186,7 @@ internal sealed class DictationController : IAsyncDisposable
         bool enableVoiceCommands = true,
         string voiceStopPhrase = "potato farmer",
         string voiceHistoryPhrase = "show me the money",
+        IReadOnlyList<VoiceShellCommand>? voiceShellCommands = null,
         IReadOnlyList<TranscriptReplacementRule>? transcriptReplacements = null)
     {
         this.exclusiveMicAccessWhileDictating = exclusiveMicAccessWhileDictating;
@@ -198,6 +202,7 @@ internal sealed class DictationController : IAsyncDisposable
         this.enableVoiceCommands = enableVoiceCommands;
         this.voiceStopPhrase = NormalizeVoiceCommandPhrase(voiceStopPhrase);
         this.voiceHistoryPhrase = NormalizeVoiceCommandPhrase(voiceHistoryPhrase);
+        this.ReplaceVoiceShellCommands(voiceShellCommands);
         this.ReplaceTranscriptReplacementRules(transcriptReplacements);
         this.textInjectionPipeline.UpdateConfiguration(
             transcriptionBackend,
@@ -236,6 +241,7 @@ internal sealed class DictationController : IAsyncDisposable
         bool enableVoiceCommands,
         string voiceStopPhrase,
         string voiceHistoryPhrase,
+        IReadOnlyList<VoiceShellCommand>? voiceShellCommands = null,
         IReadOnlyList<TranscriptReplacementRule>? transcriptReplacements = null)
     {
         lock (this.configSync)
@@ -253,6 +259,7 @@ internal sealed class DictationController : IAsyncDisposable
             this.enableVoiceCommands = enableVoiceCommands;
             this.voiceStopPhrase = NormalizeVoiceCommandPhrase(voiceStopPhrase);
             this.voiceHistoryPhrase = NormalizeVoiceCommandPhrase(voiceHistoryPhrase);
+            this.ReplaceVoiceShellCommands(voiceShellCommands);
             this.ReplaceTranscriptReplacementRules(transcriptReplacements);
         }
 
@@ -696,7 +703,20 @@ internal sealed class DictationController : IAsyncDisposable
             finalTranscript = await this.textInjectionPipeline.TranscribeAsync(audio, CancellationToken.None)
                 .ConfigureAwait(false);
             finalTranscript = RemoveTrailingSilenceArtifact(finalTranscript, stopReason);
-            var finalCommandMatch = VoiceCommandMatcher.Apply(finalTranscript, this.GetVoiceCommandOptionsSnapshot());
+            var finalCommandMatch = VoiceCommandMatcher.Apply(
+                finalTranscript,
+                this.GetVoiceCommandOptionsSnapshot(),
+                includeShellCommands: true);
+            if (finalCommandMatch.ShellCommandInvocation is { } shellCommandInvocation)
+            {
+                await this.HandleVoiceShellCommandAsync(shellCommandInvocation, audio.Duration).ConfigureAwait(false);
+                if (shellCommandInvocation.Command.CompletionBehavior == VoiceShellCommandCompletionBehavior.Stop ||
+                    string.IsNullOrWhiteSpace(finalCommandMatch.CleanedText))
+                {
+                    return;
+                }
+            }
+
             finalTranscript = finalCommandMatch.CleanedText;
             if (finalCommandMatch.StopRequested)
             {
@@ -817,7 +837,9 @@ internal sealed class DictationController : IAsyncDisposable
                         "Focused window changed before transcript typing.",
                         sendEnterAfterCommit: false,
                         originalTranscript: originalTranscript,
-                        ollamaSystemPrompt: ollamaSystemPrompt);
+                        ollamaSystemPrompt: ollamaSystemPrompt,
+                        targetAppName: target.ProcessName,
+                        targetWindowTitle: target.Title);
                     return;
                 }
 
@@ -834,7 +856,9 @@ internal sealed class DictationController : IAsyncDisposable
                         error: null,
                         sendEnterAfterCommit: false,
                         originalTranscript: originalTranscript,
-                        ollamaSystemPrompt: ollamaSystemPrompt);
+                        ollamaSystemPrompt: ollamaSystemPrompt,
+                        targetAppName: target.ProcessName,
+                        targetWindowTitle: target.Title);
                     return;
                 }
 
@@ -851,7 +875,9 @@ internal sealed class DictationController : IAsyncDisposable
                         "Focused window changed and PrimeDictate could not restore the original target.",
                         sendEnterAfterCommit: false,
                         originalTranscript: originalTranscript,
-                        ollamaSystemPrompt: ollamaSystemPrompt);
+                        ollamaSystemPrompt: ollamaSystemPrompt,
+                        targetAppName: target.ProcessName,
+                        targetWindowTitle: target.Title);
                     return;
                 }
 
@@ -877,7 +903,9 @@ internal sealed class DictationController : IAsyncDisposable
                 error: null,
                 sendEnterAfterCommit: shouldSendEnter,
                 originalTranscript: originalTranscript,
-                ollamaSystemPrompt: ollamaSystemPrompt);
+                ollamaSystemPrompt: ollamaSystemPrompt,
+                targetAppName: target?.ProcessName,
+                targetWindowTitle: target?.Title);
         }
         catch (Exception ex)
         {
@@ -891,6 +919,8 @@ internal sealed class DictationController : IAsyncDisposable
                     Transcript: finalTranscript ?? string.Empty,
                     DeliveryStatus: TranscriptDeliveryStatus.FailedToInject,
                     TargetDisplayName: target?.DisplayName,
+                    TargetAppName: target?.ProcessName,
+                    TargetWindowTitle: target?.Title,
                     Error: ex.Message,
                     AudioDuration: audio.Duration,
                     SendEnterAfterCommit: false,
@@ -898,6 +928,85 @@ internal sealed class DictationController : IAsyncDisposable
                     OllamaSystemPrompt: ollamaSystemPrompt));
             }
         }
+    }
+
+    private async Task HandleVoiceShellCommandAsync(
+        VoiceShellCommandInvocation invocation,
+        TimeSpan audioDuration)
+    {
+        var shellCommand = invocation.Command;
+        var phrase = shellCommand.Phrase.Trim();
+        var transcript = string.IsNullOrWhiteSpace(invocation.TextToType)
+            ? $"Voice command: {phrase}"
+            : $"Voice command: {phrase}; typed: {invocation.TextToType}";
+        if (this.activeThreadId is Guid threadId)
+        {
+            this.ThreadTranscriptUpdated?.Invoke(threadId, transcript);
+        }
+
+        try
+        {
+            var result = VoiceShellCommandRunner.Run(shellCommand);
+            AppLog.Info(
+                $"Voice command ran: \"{phrase}\" -> {shellCommand.Command.Trim()} (pid {result.ProcessId?.ToString() ?? "unknown"}).",
+                this.activeThreadId);
+            if (!string.IsNullOrWhiteSpace(invocation.TextToType))
+            {
+                if (!await this.WaitForVoiceShellTypeTargetAsync().ConfigureAwait(false))
+                {
+                    throw new InvalidOperationException(
+                        "Chained typing skipped because the command did not move focus away from the starting window.");
+                }
+
+                this.textInjectionPipeline.InjectTextToTarget(invocation.TextToType);
+                AppLog.Info($"Voice command typed chained text ({invocation.TextToType.Length:N0} chars).", this.activeThreadId);
+            }
+
+            this.PublishTranscriptCommit(
+                transcript,
+                audioDuration,
+                TranscriptDeliveryStatus.CommandExecuted,
+                "Command Prompt",
+                error: null,
+                sendEnterAfterCommit: false,
+                targetAppName: "Command Prompt",
+                targetWindowTitle: "Command Prompt");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"Voice command failed: \"{phrase}\" -> {ex.Message}", this.activeThreadId);
+            this.PublishTranscriptCommit(
+                transcript,
+                audioDuration,
+                TranscriptDeliveryStatus.CommandFailed,
+                "Command Prompt",
+                ex.Message,
+                sendEnterAfterCommit: false,
+                targetAppName: "Command Prompt",
+                targetWindowTitle: "Command Prompt");
+        }
+    }
+
+    private async Task<bool> WaitForVoiceShellTypeTargetAsync()
+    {
+        var startTarget = this.activeInputTarget;
+        if (startTarget is null)
+        {
+            await Task.Delay(VoiceShellTypePollInterval).ConfigureAwait(false);
+            return true;
+        }
+
+        var deadlineUtc = DateTime.UtcNow + VoiceShellTypeTargetWait;
+        while (DateTime.UtcNow < deadlineUtc)
+        {
+            await Task.Delay(VoiceShellTypePollInterval).ConfigureAwait(false);
+            if (!startTarget.IsStillForeground())
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void PublishTranscriptCommit(
@@ -908,7 +1017,9 @@ internal sealed class DictationController : IAsyncDisposable
         string? error,
         bool sendEnterAfterCommit,
         string? originalTranscript = null,
-        string? ollamaSystemPrompt = null)
+        string? ollamaSystemPrompt = null,
+        string? targetAppName = null,
+        string? targetWindowTitle = null)
     {
         if (this.activeThreadId is not Guid threadId)
         {
@@ -921,6 +1032,8 @@ internal sealed class DictationController : IAsyncDisposable
             Transcript: transcript,
             DeliveryStatus: status,
             TargetDisplayName: targetDisplayName,
+            TargetAppName: targetAppName,
+            TargetWindowTitle: targetWindowTitle,
             Error: error,
             AudioDuration: audioDuration,
             SendEnterAfterCommit: sendEnterAfterCommit,
@@ -941,6 +1054,28 @@ internal sealed class DictationController : IAsyncDisposable
             .ToList();
     }
 
+    private void ReplaceVoiceShellCommands(IReadOnlyList<VoiceShellCommand>? commands)
+    {
+        if (commands is null || commands.Count == 0)
+        {
+            this.voiceShellCommands = new List<VoiceShellCommand>();
+            return;
+        }
+
+        this.voiceShellCommands = commands
+            .Where(command =>
+                !string.IsNullOrWhiteSpace(command.Phrase) &&
+                !string.IsNullOrWhiteSpace(command.Command))
+            .Select(command => new VoiceShellCommand
+            {
+                Enabled = command.Enabled,
+                Phrase = command.Phrase.Trim(),
+                CompletionBehavior = command.CompletionBehavior,
+                Command = command.Command.Trim()
+            })
+            .ToList();
+    }
+
     private VoiceCommandOptions GetVoiceCommandOptionsSnapshot()
     {
         lock (this.configSync)
@@ -948,7 +1083,16 @@ internal sealed class DictationController : IAsyncDisposable
             return new VoiceCommandOptions(
                 this.enableVoiceCommands,
                 this.voiceStopPhrase,
-                this.voiceHistoryPhrase);
+                this.voiceHistoryPhrase,
+                this.voiceShellCommands
+                    .Select(command => new VoiceShellCommand
+                    {
+                        Enabled = command.Enabled,
+                        Phrase = command.Phrase,
+                        CompletionBehavior = command.CompletionBehavior,
+                        Command = command.Command
+                    })
+                    .ToList());
         }
     }
 

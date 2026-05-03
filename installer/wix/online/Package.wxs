@@ -1,4 +1,5 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
       Name="PrimeDictate"
@@ -9,6 +10,10 @@
       InstallerVersion="500"
       Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer version of PrimeDictate is already installed." />
+    <util:QueryNativeMachine />
+    <Launch
+        Condition='"$(sys.BUILDARCH)" ~= "x64" IMP (NOT WIX_NATIVE_MACHINE OR WIX_NATIVE_MACHINE = 34404)'
+        Message="This x64 installer is for Intel/AMD64 Windows. Use the ARM64 installer on Copilot+ PCs for native QNN/NPU support." />
     <MediaTemplate EmbedCab="yes" />
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)..\assets\License.rtf" />
@@ -23,7 +28,7 @@
         Execute="immediate" />
     <CustomAction
         Id="LaunchApplication"
-        BinaryRef="Wix4UtilCA_X64"
+        BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
         DllEntry="WixShellExec"
         Execute="immediate"
         Impersonate="yes"

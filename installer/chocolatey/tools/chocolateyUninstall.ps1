@@ -1,7 +1,4 @@
 $ErrorActionPreference = 'Stop'
-$toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$installerPath = Join-Path $toolsDir 'PrimeDictate-Online.msi'
-
 $silentArgs = '/qn /norestart'
 $validExitCodes = @(0, 3010, 1605, 1614, 1641)
 $msiExec = Join-Path $env:SystemRoot 'System32\msiexec.exe'
@@ -22,16 +19,4 @@ if ($installedProduct) {
   return
 }
 
-if (Test-Path $installerPath) {
-  $packageArgs = @{
-    packageName    = 'primedictate'
-    fileType       = 'msi'
-    file           = $installerPath
-    silentArgs     = $silentArgs
-    validExitCodes = $validExitCodes
-  }
-
-  Uninstall-ChocolateyPackage @packageArgs
-} else {
-  Write-Warning "No installed PrimeDictate product code found and bundled MSI is missing at '$installerPath'. Skipping MSI uninstall step."
-}
+Write-Warning "No installed PrimeDictate product code found. Skipping MSI uninstall step."

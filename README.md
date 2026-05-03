@@ -17,7 +17,7 @@
 ## Features
 
 - **Global hotkeys**: Configurable global shortcuts for start/stop toggle (default `Ctrl+Shift+Space`), emergency stop/discard (default `Ctrl+Shift+Enter`), and transcript history (default `Ctrl+Shift+H`).
-- **Voice commands**: Optional phrases can be detected while dictating. Defaults are `potato farmer` to discard the active capture and `show me the money` to open history; command phrases are removed before final text injection.
+- **Voice commands**: Optional phrases can be detected while dictating. Defaults are `potato farmer` to discard the active capture and `show me the money` to open history; command phrases are removed before final text injection. Custom computer commands can run local command prompt actions and either stop the commit or continue with the remaining dictated text.
 - **Tray workspace UI**: Open **Workspace** from the tray icon to browse per-session dictation threads and global runtime logs in a clearer, column-based dashboard layout.
 - **AI Prompt Modes (Ollama Integration)**: Automatically rewrite and format your transcripts using a local Ollama instance. Includes dynamic prompt modes (like Bug, Update, and Blog) and injects the active application's context into the LLM for application-aware output.
 - **Log signal over noise**: Repeated adjacent log entries are collapsed (for example `(... x12)`) and history is capped to keep memory usage predictable.
@@ -36,7 +36,7 @@
 - **Return to original target (optional)**: A dictation setting can deliver the final transcript back to the window that had focus when recording started, first trying a safe direct write to the captured edit control on Windows and otherwise reactivating that window before typing.
 - **Built-in pointer cue**: If Windows Mouse Sonar is enabled, PrimeDictate pulses it on recording/processing transitions by tapping Ctrl. It does not draw a custom pointer overlay or change the user's Windows setting.
 - **Custom audio earcons**: PrimeDictate can play its own short start/stop tones so you hear when recording begins and when capture hands off to transcription.
-- **Launch at login**: Installers enable automatic startup by default so PrimeDictate is ready after a reboot. Silent MSI and Chocolatey installs can opt out.
+- **Launch at login**: Installers enable automatic startup by default with a Windows Startup-folder shortcut so PrimeDictate is ready after a reboot. Silent MSI and Chocolatey installs can opt out, and Settings can switch between off, current-user startup, and all-users startup.
 - **Audio**: Windows default capture device via NAudio **WASAPI** (`WasapiCapture`), resampled to **16 kHz, 16-bit, mono PCM** for local transcription engines.
 - **Mic isolation mode (best effort)**: Optional exclusive-capture setting can block other apps from the mic on supported devices; if exclusive capture fails, PrimeDictate automatically falls back to shared mode and continues dictation.
 - **Inference**: A shared transcription engine abstraction with Whisper, Parakeet, and Moonshine ONNX models through [sherpa-onnx](https://www.nuget.org/packages/org.k2fsa.sherpa.onnx), plus Whisper.net GGML for GPU/NPU-capable local Whisper runs.
@@ -225,15 +225,16 @@ If `git ls-remote` prints an existing tag, do not recreate it; choose the correc
 Tagged pushes that match `vX.Y.Z` keep the workflow artifact upload for CI debugging and also publish installer assets to the matching GitHub Release. If the Release does not exist yet, the workflow creates it first. Release downloads come from **GitHub Releases**, not the temporary workflow artifact ZIP. If Azure Key Vault signing secrets are unavailable, the release flow still publishes assets as unsigned builds instead of failing before release upload.
 
 - Release page: `https://github.com/CakeRepository/PrimeDictate/releases/tag/vX.Y.Z`
-- Direct MSI asset: `https://github.com/CakeRepository/PrimeDictate/releases/download/vX.Y.Z/PrimeDictate-Setup-vX.Y.Z.msi`
+- Direct x64 MSI asset: `https://github.com/CakeRepository/PrimeDictate/releases/download/vX.Y.Z/PrimeDictate-Setup-vX.Y.Z-x64.msi`
+- Direct ARM64 MSI asset: `https://github.com/CakeRepository/PrimeDictate/releases/download/vX.Y.Z/PrimeDictate-Setup-vX.Y.Z-arm64.msi`
 - Latest release page: `https://github.com/CakeRepository/PrimeDictate/releases/latest`
 - Chocolatey package asset: `https://github.com/CakeRepository/PrimeDictate/releases/download/vX.Y.Z/primedictate.X.Y.Z.nupkg`
 
-Because the MSI filename includes the tag, Webflow should either link to the release page/latest page or update the direct MSI URL each time a new release tag is published.
+Because the MSI filenames include the tag and architecture, Webflow should either link to the release page/latest page or update both direct MSI URLs each time a new release tag is published.
 
 ### Chocolatey release alignment
 
-Chocolatey packaging is part of the same `vX.Y.Z` tag release flow so MSI, docs, and Chocolatey stay aligned.
+Chocolatey packaging is part of the same `vX.Y.Z` tag release flow so MSI, docs, and Chocolatey stay aligned. The package downloads the versioned GitHub Release MSI for the machine architecture and verifies it with a SHA256 checksum embedded during package build.
 
 - Chocolatey package id: `primedictate`
 - Chocolatey package source/repo: `https://github.com/CakeRepository/PrimeDictate`
@@ -246,10 +247,11 @@ For moderation retries, maintainers can repack and push locally with the same ve
 
 ### Silent install and update commands (Windows)
 
-- MSI install (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z.msi /qn /norestart`
-- MSI install without launch at login: `msiexec /i PrimeDictate-Setup-vX.Y.Z.msi LAUNCHATLOGIN=0 /qn /norestart`
-- MSI upgrade (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z.msi REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart`
-- MSI uninstall (silent): `msiexec /x PrimeDictate-Setup-vX.Y.Z.msi /qn /norestart`
+- MSI install x64 (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z-x64.msi /qn /norestart`
+- MSI install ARM64 (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z-arm64.msi /qn /norestart`
+- MSI install without launch at login: `msiexec /i PrimeDictate-Setup-vX.Y.Z-<arch>.msi LAUNCHATLOGIN=0 /qn /norestart`
+- MSI upgrade (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z-<arch>.msi REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart`
+- MSI uninstall (silent): `msiexec /x PrimeDictate-Setup-vX.Y.Z-<arch>.msi /qn /norestart`
 - Chocolatey install (silent by default): `choco install primedictate -y`
 - Chocolatey install without launch at login: `choco install primedictate -y --params "'/NoLaunchAtLogin'"`
 - Chocolatey upgrade (silent): `choco upgrade primedictate -y`
@@ -261,8 +263,8 @@ PrimeDictate now runs as a **WPF tray app** (no console window in normal use):
 
 - **Tray shell**: Notification-area icon with **Open Workspace**, **Settings**, and **Exit** menu items.
 - **Tray status colors**: **Ready = Blue**, **Recording = Red**, **Processing = Green**, **Error = Yellow**. Tooltip text follows app state (`Ready`, `Listening`, `Processing transcript`, `Error`).
-- **First launch**: If `%LocalAppData%\PrimeDictate\settings.json` is missing or incomplete, a guided setup window appears with **Welcome**, **Model**, **Dictation**, **Replacements**, and **Impact** tabs.
-- **Configurable shortcuts**: Global toggle, emergency stop, and history shortcuts are loaded from saved settings and applied to `GlobalHotkeyListener` at startup. Voice command phrases are configurable from the same simplified Shortcuts tab.
+- **First launch**: If `%LocalAppData%\PrimeDictate\settings.json` is missing or incomplete, a guided setup window appears with **Welcome**, **Model**, **Commands**, **Replacements**, and **Impact** tabs.
+- **Configurable commands**: Global toggle, emergency stop, and history shortcuts are loaded from saved settings and applied to `GlobalHotkeyListener` at startup. Voice command phrases and command prompt actions, including chained `type ...` text and Stop/Continue behavior, are configurable from the Commands tab.
 - **Backend picker + download**: Setup and Settings include curated Whisper, Parakeet, and Moonshine model options, local download progress, and a manual browse fallback.
 - **Experimental ARM64 QNN path**: Native `win-arm64` builds can expose an experimental Qualcomm QNN backend that drives Moonshine through ONNX Runtime with explicit QNN-versus-CPU diagnostics.
 - **Runtime model switching**: Changing the selected backend or model causes the next transcription session to reload the correct engine automatically.
@@ -270,7 +272,7 @@ PrimeDictate now runs as a **WPF tray app** (no console window in normal use):
 - **Impact dashboard**: Settings includes a local stats tab with productivity cards, a 14-day words chart, and milestone achievements.
 - **Installer continuity**: The online MSI keeps one product identity for clean upgrades.
 - **Installer finish launch**: The online MSI exposes **“Launch PrimeDictate when setup completes”** (checked by default), which starts the app after install.
-- **Launch at login**: MSI installs add a Windows Run value by default. Use `LAUNCHATLOGIN=0` for silent MSI installs or Chocolatey `/NoLaunchAtLogin` when you do not want PrimeDictate to start when users sign in.
+- **Launch at login**: MSI installs add an all-users Windows Startup shortcut by default. Use `LAUNCHATLOGIN=0` for silent MSI installs or Chocolatey `/NoLaunchAtLogin` when you do not want PrimeDictate to start when users sign in. The Settings window can move startup to the current user’s Startup folder or disable it later.
 
 **Publish folder only** (no installer):
 
@@ -311,8 +313,8 @@ The app starts in the tray. On first launch, complete setup, then focus another 
 
 | Mechanism | Purpose |
 |-----------|---------|
-| `--enable-launch-at-login` / `--disable-launch-at-login` | Command line switches that add or remove the Windows Run entry for PrimeDictate. Machine-wide entries require an elevated shell to disable. |
-| User settings + first-run | Stored at `%LocalAppData%\PrimeDictate\settings.json` with `FirstRunCompleted`, dictation/stop/history hotkeys, optional voice command phrases, selected backend, selected model id, resolved model path, optional exclusive mic capture toggle, overlay style, silence auto-commit delay, return-to-original-target toggle, audio cue toggle, overlay placement, coding-mode Enter toggle, and baseline typing speed for impact estimates. |
+| `--enable-launch-at-login` / `--disable-launch-at-login` | Command line switches that add or remove `PrimeDictate.lnk` from the current-user or all-users Windows Startup folder. All-users changes request elevation when needed. |
+| User settings + first-run | Stored at `%LocalAppData%\PrimeDictate\settings.json` with `FirstRunCompleted`, launch-at-login scope, dictation/stop/history hotkeys, optional voice command phrases, selected backend, selected model id, resolved model path, optional exclusive mic capture toggle, overlay style, silence auto-commit delay, return-to-original-target toggle, audio cue toggle, overlay placement, coding-mode Enter toggle, and baseline typing speed for impact estimates. |
 | `PRIMEDICTATE_QNN_*` env vars | Maintainer and validation controls for the experimental Qualcomm QNN backend, including strict no-CPU-fallback mode, context caching, and optional QNN profiling output. |
 
 ![Dictation Settings](assets/settings_dictation.png)

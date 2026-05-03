@@ -1,3 +1,11 @@
+# PrimeDictate 4.4.0
+
+## Highlights
+
+- Added native ARM64 publish and online MSI packaging for Copilot+ PCs.
+- Updated GitHub Actions release publishing to build x64 and ARM64 MSIs and attach both to tagged releases.
+- Updated Chocolatey packaging to download the correct GitHub Release MSI for the machine architecture and verify it with SHA256 before install.
+
 # PrimeDictate 4.1.0
 
 ## Highlights

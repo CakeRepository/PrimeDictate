@@ -1,10 +1,13 @@
 <Project Sdk="WixToolset.Sdk/6.0.0">
   <PropertyGroup>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <OutputName>PrimeDictate-$(Version)-Windows-Online</OutputName>
-    <InstallerPlatform>x64</InstallerPlatform>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <InstallerPlatform Condition="'$(InstallerPlatform)' == '' and '$(RuntimeIdentifier)' == 'win-arm64'">arm64</InstallerPlatform>
+    <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
+    <IntermediateOutputPath>obj\$(InstallerPlatform)\$(Configuration)\</IntermediateOutputPath>
+    <OutputName>PrimeDictate-$(Version)-Windows-$(InstallerPlatform)-Online</OutputName>
     <Cultures>en-US</Cultures>
-    <PublishDir Condition="'$(PublishDir)' == ''">$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..\..\..\artifacts\win-x64\publish'))</PublishDir>
+    <PublishDir Condition="'$(PublishDir)' == ''">$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..\..\..\artifacts\$(RuntimeIdentifier)\publish'))</PublishDir>
     <ProductVersion>$(Version).0</ProductVersion>
     <DefineConstants>ProductVersion=$(ProductVersion)</DefineConstants>
   </PropertyGroup>

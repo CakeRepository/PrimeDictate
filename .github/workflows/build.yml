@@ -29,7 +29,7 @@ jobs:
   dotnet:
     runs-on: windows-latest
     env:
-      PUBLISH_DIR: ${{ github.workspace }}\artifacts\win-x64\publish
+      PUBLISH_ROOT: ${{ github.workspace }}\artifacts
       INSTALLER_DIR: ${{ github.workspace }}\artifacts\installer
       RELEASE_ASSET_DIR: ${{ github.workspace }}\prime-dictate-release-assets
     steps:
@@ -133,15 +133,22 @@ jobs:
           -p:FileVersion=${{ steps.version.outputs.file_version }}
           -p:InformationalVersion=${{ steps.version.outputs.informational_version }}
 
-      - name: Publish (win-x64)
+      - name: Publish Windows payloads
         if: github.event_name != 'workflow_dispatch' || !inputs.push_only
         shell: pwsh
-        run: >
-          .\scripts\Publish-Windows.ps1
-          -PackageVersion "${{ steps.version.outputs.package_version }}"
-          -AssemblyVersion "${{ steps.version.outputs.assembly_version }}"
-          -FileVersion "${{ steps.version.outputs.file_version }}"
-          -InformationalVersion "${{ steps.version.outputs.informational_version }}"
+        run: |
+          foreach ($rid in @("win-x64", "win-arm64")) {
+            .\scripts\Publish-Windows.ps1 `
+              -RuntimeIdentifier $rid `
+              -PackageVersion "${{ steps.version.outputs.package_version }}" `
+              -AssemblyVersion "${{ steps.version.outputs.assembly_version }}" `
+              -FileVersion "${{ steps.version.outputs.file_version }}" `
+              -InformationalVersion "${{ steps.version.outputs.informational_version }}"
+
+            if ($LASTEXITCODE -ne 0) {
+              throw "Publish failed for $rid with exit code $LASTEXITCODE"
+            }
+          }
 
       - name: Install AzureSignTool
         if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || !inputs.push_only) && steps.signing.outputs.enabled == 'true'
@@ -171,9 +178,14 @@ jobs:
 
           $timestampUrl = if ([string]::IsNullOrWhiteSpace($env:AZURESIGNTOOL_TIMESTAMP_URL)) { "http://timestamp.globalsign.com/tsa/advanced" } else { $env:AZURESIGNTOOL_TIMESTAMP_URL }
 
-          $filesToSign = Get-ChildItem -Path $env:PUBLISH_DIR -Include *.exe,*.dll -File -Recurse | Select-Object -ExpandProperty FullName
+          $publishDirs = Get-ChildItem -Path $env:PUBLISH_ROOT -Directory -Filter "win-*" -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName "publish" } |
+            Where-Object { Test-Path $_ }
+          $filesToSign = foreach ($publishDir in $publishDirs) {
+            Get-ChildItem -Path $publishDir -Include *.exe,*.dll -File -Recurse | Select-Object -ExpandProperty FullName
+          }
           if (-not $filesToSign -or $filesToSign.Count -eq 0) {
-            throw "No publish payload binaries found to sign under $env:PUBLISH_DIR"
+            throw "No publish payload binaries found to sign under $env:PUBLISH_ROOT"
           }
 
           foreach ($path in $filesToSign) {
@@ -193,11 +205,11 @@ jobs:
               "$path"
           }
 
-      - name: Build online installer
+      - name: Build online installers
         if: github.event_name != 'workflow_dispatch' || !inputs.push_only
         shell: pwsh
         run: >
-          .\scripts\Build-Installers.ps1 -Installer Online -SkipPublish
+          .\scripts\Build-Installers.ps1 -Installer Online -RuntimeIdentifier all -SkipPublish -SkipChocolatey
           -PackageVersion "${{ steps.version.outputs.package_version }}"
           -AssemblyVersion "${{ steps.version.outputs.assembly_version }}"
           -FileVersion "${{ steps.version.outputs.file_version }}"
@@ -243,13 +255,24 @@ jobs:
               "$($msi.FullName)"
           }
 
+      - name: Build Chocolatey package
+        if: github.event_name != 'workflow_dispatch' || !inputs.push_only
+        shell: pwsh
+        run: >
+          .\scripts\Build-Installers.ps1 -Installer Online -RuntimeIdentifier all -ChocolateyOnly
+          -PackageVersion "${{ steps.version.outputs.package_version }}"
+          -AssemblyVersion "${{ steps.version.outputs.assembly_version }}"
+          -FileVersion "${{ steps.version.outputs.file_version }}"
+          -InformationalVersion "${{ steps.version.outputs.informational_version }}"
+
       - name: Upload build artifacts
         if: always() && (github.event_name != 'workflow_dispatch' || !inputs.push_only)
         uses: actions/upload-artifact@v4
         with:
-          name: prime-dictate-win-x64-${{ steps.version.outputs.package_version }}
+          name: prime-dictate-windows-${{ steps.version.outputs.package_version }}
           path: |
             artifacts/win-x64/publish/**
+            artifacts/win-arm64/publish/**
             artifacts/installer/*.msi
             artifacts/installer/*.nupkg
 
@@ -260,28 +283,36 @@ jobs:
         run: |
           $tag = "${{ steps.version.outputs.release_tag }}"
           $assetDir = $env:RELEASE_ASSET_DIR
-          $expectedOnlineMsi = Join-Path $env:INSTALLER_DIR "PrimeDictate-${{ steps.version.outputs.package_version }}-Windows-Online.msi"
+          $expectedX64Msi = Join-Path $env:INSTALLER_DIR "PrimeDictate-${{ steps.version.outputs.package_version }}-Windows-x64-Online.msi"
+          $expectedArm64Msi = Join-Path $env:INSTALLER_DIR "PrimeDictate-${{ steps.version.outputs.package_version }}-Windows-arm64-Online.msi"
           $expectedChocolateyNupkg = Join-Path $env:INSTALLER_DIR "primedictate.${{ steps.version.outputs.package_version }}.nupkg"
 
           Remove-Item -Path $assetDir -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
 
-          if (-not (Test-Path $expectedOnlineMsi)) {
-            throw "Expected online MSI not found for release upload: $expectedOnlineMsi"
+          if (-not (Test-Path $expectedX64Msi)) {
+            throw "Expected x64 online MSI not found for release upload: $expectedX64Msi"
+          }
+          if (-not (Test-Path $expectedArm64Msi)) {
+            throw "Expected ARM64 online MSI not found for release upload: $expectedArm64Msi"
           }
           if (-not (Test-Path $expectedChocolateyNupkg)) {
             throw "Expected Chocolatey package not found for release upload: $expectedChocolateyNupkg"
           }
 
-          $releaseMsiPath = Join-Path $assetDir "PrimeDictate-Setup-$tag.msi"
+          $releaseX64MsiPath = Join-Path $assetDir "PrimeDictate-Setup-$tag-x64.msi"
+          $releaseArm64MsiPath = Join-Path $assetDir "PrimeDictate-Setup-$tag-arm64.msi"
           $releaseNupkgPath = Join-Path $assetDir "primedictate.${{ steps.version.outputs.package_version }}.nupkg"
 
-          Copy-Item -Path $expectedOnlineMsi -Destination $releaseMsiPath -Force
+          Copy-Item -Path $expectedX64Msi -Destination $releaseX64MsiPath -Force
+          Copy-Item -Path $expectedArm64Msi -Destination $releaseArm64MsiPath -Force
           Copy-Item -Path $expectedChocolateyNupkg -Destination $releaseNupkgPath -Force
 
-          $msiHash = (Get-FileHash -Path $releaseMsiPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $x64MsiHash = (Get-FileHash -Path $releaseX64MsiPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $arm64MsiHash = (Get-FileHash -Path $releaseArm64MsiPath -Algorithm SHA256).Hash.ToLowerInvariant()
           $nupkgHash = (Get-FileHash -Path $releaseNupkgPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content -Path (Join-Path $assetDir "PrimeDictate-Setup-$tag.msi.sha256") -Value "$msiHash  PrimeDictate-Setup-$tag.msi" -NoNewline
+          Set-Content -Path (Join-Path $assetDir "PrimeDictate-Setup-$tag-x64.msi.sha256") -Value "$x64MsiHash  PrimeDictate-Setup-$tag-x64.msi" -NoNewline
+          Set-Content -Path (Join-Path $assetDir "PrimeDictate-Setup-$tag-arm64.msi.sha256") -Value "$arm64MsiHash  PrimeDictate-Setup-$tag-arm64.msi" -NoNewline
           Set-Content -Path (Join-Path $assetDir "primedictate.${{ steps.version.outputs.package_version }}.nupkg.sha256") -Value "$nupkgHash  primedictate.${{ steps.version.outputs.package_version }}.nupkg" -NoNewline
 
           "asset_dir=$assetDir" >> $env:GITHUB_OUTPUT

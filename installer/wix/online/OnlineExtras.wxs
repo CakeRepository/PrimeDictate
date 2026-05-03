@@ -21,7 +21,7 @@
         Condition="NOT REMOVE" />
     <CustomAction
         Id="RunDownloadModel"
-        BinaryRef="Wix4UtilCA_X64"
+        BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
         DllEntry="WixQuietExec"
         Execute="deferred"
         Impersonate="no"

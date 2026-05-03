@@ -64,6 +64,7 @@ internal partial class SettingsWindow : Window
     private readonly IReadOnlyList<BackendChoice> availableBackendChoices;
     private CancellationTokenSource? modelDownloadCts;
     private TranscriptionBackendKind currentBackend;
+    private readonly ObservableCollection<VoiceShellCommand> voiceShellCommands = new();
     private readonly ObservableCollection<TranscriptReplacementRule> transcriptReplacementRules = new();
 
     internal SettingsWindow(AppSettings settings, bool isFirstRun, DictationStatsState? statsState = null)
@@ -82,9 +83,11 @@ internal partial class SettingsWindow : Window
         this.ModelBackendComboBox.DisplayMemberPath = nameof(BackendChoice.Label);
         this.ModelChoiceComboBox.DisplayMemberPath = nameof(WhisperModelOption.DisplayName);
         this.ComputeInterfaceComboBox.DisplayMemberPath = nameof(TranscriptionComputeChoice.Label);
+        this.VoiceShellCommandBehaviorColumn.ItemsSource = Enum.GetValues<VoiceShellCommandCompletionBehavior>();
 
         this.UpdateHotkeyLabels();
         this.TrayBehaviorComboBox.SelectedIndex = settings.TrayClickBehavior == TrayClickBehavior.SingleClickOpensSettings ? 0 : 1;
+        this.LaunchAtLoginComboBox.SelectedIndex = GetLaunchAtLoginComboBoxIndex(ResolveLaunchAtLoginScope(settings.LaunchAtLoginScope));
         this.ExclusiveMicAccessCheckBox.IsChecked = settings.ExclusiveMicAccessWhileDictating;
         this.InitializeInputDeviceOptions(settings.SelectedInputDeviceId);
         this.InputGainTextBox.Text = settings.InputGainMultiplier.ToString("0.##", CultureInfo.InvariantCulture);
@@ -96,6 +99,18 @@ internal partial class SettingsWindow : Window
         this.EnableVoiceCommandsCheckBox.IsChecked = settings.EnableVoiceCommands;
         this.VoiceStopPhraseTextBox.Text = settings.VoiceStopPhrase;
         this.VoiceHistoryPhraseTextBox.Text = settings.VoiceHistoryPhrase;
+        foreach (var command in settings.VoiceShellCommands ?? [])
+        {
+            this.voiceShellCommands.Add(new VoiceShellCommand
+            {
+                Enabled = command.Enabled,
+                Phrase = command.Phrase,
+                CompletionBehavior = command.CompletionBehavior,
+                Command = command.Command
+            });
+        }
+
+        this.VoiceShellCommandsDataGrid.ItemsSource = this.voiceShellCommands;
         this.EnableOllamaCheckBox.IsChecked = settings.EnableOllamaPostProcessing;
         this.OllamaEndpointTextBox.Text = settings.OllamaEndpoint;
         this.OllamaModelTextBox.Text = settings.OllamaModel;
@@ -129,7 +144,7 @@ internal partial class SettingsWindow : Window
         this.WelcomeTab.Header = isFirstRun ? "Welcome" : "Overview";
         this.HeaderText.Text = isFirstRun ? "PrimeDictate first-run setup" : "PrimeDictate settings";
         this.WelcomeFooterText.Text = isFirstRun
-            ? "Choose a model, confirm your shortcuts, and PrimeDictate is ready to dictate into Windows apps."
+            ? "Choose a model, configure your commands, and PrimeDictate is ready to dictate into Windows apps."
             : "You can switch models or tweak dictation behavior here whenever your workflow changes.";
         this.ReplacementsTab.Visibility = isFirstRun ? Visibility.Collapsed : Visibility.Visible;
         this.ImpactTab.Visibility = isFirstRun ? Visibility.Collapsed : Visibility.Visible;
@@ -921,6 +936,17 @@ internal partial class SettingsWindow : Window
             return;
         }
 
+        if (!LaunchAtLoginManager.TryApply(settings.LaunchAtLoginScope, out var launchAtLoginError))
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                launchAtLoginError,
+                "Could not update startup shortcut",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         this.SettingsSaved?.Invoke(settings);
         this.Close();
     }
@@ -1000,7 +1026,7 @@ internal partial class SettingsWindow : Window
 
         if (!this.isFirstRun)
         {
-            this.HeaderSubtextText.Text = "Manage your local model, shortcuts, and dictation behavior.";
+            this.HeaderSubtextText.Text = "Manage your local model, commands, and dictation behavior.";
             this.BackButton.Visibility = Visibility.Collapsed;
             this.CancelButton.Visibility = Visibility.Visible;
             this.HistoryButton.Visibility = Visibility.Visible;
@@ -1015,7 +1041,7 @@ internal partial class SettingsWindow : Window
         {
             0 => "Welcome",
             1 => "Choose your model",
-            _ => "Confirm shortcuts"
+            _ => "Configure commands"
         };
 
         this.HeaderSubtextText.Text = $"Step {stepNumber} of 3: {stepLabel}";
@@ -1462,6 +1488,7 @@ internal partial class SettingsWindow : Window
         }
 
         var selectedBehavior = ((ComboBoxItem)this.TrayBehaviorComboBox.SelectedItem).Tag?.ToString();
+        var selectedLaunchAtLoginScope = GetSelectedLaunchAtLoginScope();
         var selectedOverlayMode = ((ComboBoxItem)this.OverlayModeComboBox.SelectedItem).Tag?.ToString();
         var enableVoiceCommands = this.EnableVoiceCommandsCheckBox.IsChecked == true;
         var voiceStopPhrase = this.VoiceStopPhraseTextBox.Text.Trim();
@@ -1492,6 +1519,14 @@ internal partial class SettingsWindow : Window
             return false;
         }
 
+        if (!this.TryBuildVoiceShellCommands(
+                voiceStopPhrase,
+                voiceHistoryPhrase,
+                out var voiceShellCommandsForSave))
+        {
+            return false;
+        }
+
         var selectedOllamaModeStr = ((ComboBoxItem)this.OllamaModeComboBox.SelectedItem)?.Tag?.ToString() ?? "Default";
         if (!Enum.TryParse<OllamaMode>(selectedOllamaModeStr, out var selectedOllamaMode))
         {
@@ -1507,9 +1542,11 @@ internal partial class SettingsWindow : Window
             EnableVoiceCommands = enableVoiceCommands,
             VoiceStopPhrase = string.IsNullOrWhiteSpace(voiceStopPhrase) ? "potato farmer" : voiceStopPhrase,
             VoiceHistoryPhrase = string.IsNullOrWhiteSpace(voiceHistoryPhrase) ? "show me the money" : voiceHistoryPhrase,
+            VoiceShellCommands = voiceShellCommandsForSave,
             TrayClickBehavior = selectedBehavior == "Single"
                 ? TrayClickBehavior.SingleClickOpensSettings
                 : TrayClickBehavior.DoubleClickOpensSettings,
+            LaunchAtLoginScope = selectedLaunchAtLoginScope,
             TranscriptionBackend = this.currentBackend,
             TranscriptionComputeInterface = this.GetSelectedComputeInterface(),
             SelectedModelId = selectedModelId,
@@ -1537,6 +1574,113 @@ internal partial class SettingsWindow : Window
         };
 
         return true;
+    }
+
+    private bool TryBuildVoiceShellCommands(
+        string voiceStopPhrase,
+        string voiceHistoryPhrase,
+        out List<VoiceShellCommand> commands)
+    {
+        commands = new List<VoiceShellCommand>();
+        var phraseOwners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        AddReservedVoicePhrase(phraseOwners, voiceStopPhrase, "Stop phrase");
+        AddReservedVoicePhrase(phraseOwners, voiceHistoryPhrase, "History phrase");
+
+        foreach (var row in this.voiceShellCommands)
+        {
+            var phrase = row.Phrase.Trim();
+            var command = row.Command.Trim();
+            if (phrase.Length == 0 && command.Length == 0)
+            {
+                continue;
+            }
+
+            if (phrase.Length == 0 || command.Length == 0)
+            {
+                System.Windows.MessageBox.Show(
+                    this,
+                    "Each computer command needs both a spoken phrase and a command prompt command.",
+                    "Incomplete computer command",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return false;
+            }
+
+            var phraseKey = NormalizeVoicePhraseKey(phrase);
+            if (phraseKey.Length == 0)
+            {
+                System.Windows.MessageBox.Show(
+                    this,
+                    "Computer command phrases need at least one letter or number.",
+                    "Invalid computer command phrase",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return false;
+            }
+
+            if (phraseOwners.TryGetValue(phraseKey, out var existingOwner))
+            {
+                System.Windows.MessageBox.Show(
+                    this,
+                    $"The computer command phrase \"{phrase}\" conflicts with {existingOwner}.",
+                    "Duplicate voice command",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return false;
+            }
+
+            phraseOwners.Add(phraseKey, $"computer command \"{phrase}\"");
+            commands.Add(new VoiceShellCommand
+            {
+                Enabled = row.Enabled,
+                Phrase = phrase,
+                CompletionBehavior = row.CompletionBehavior,
+                Command = command
+            });
+        }
+
+        return true;
+    }
+
+    private static void AddReservedVoicePhrase(
+        IDictionary<string, string> phraseOwners,
+        string phrase,
+        string owner)
+    {
+        var phraseKey = NormalizeVoicePhraseKey(phrase);
+        if (phraseKey.Length > 0)
+        {
+            phraseOwners[phraseKey] = owner;
+        }
+    }
+
+    private static string NormalizeVoicePhraseKey(string phrase)
+    {
+        var parts = new List<string>();
+        var current = new List<char>();
+        foreach (var character in phrase)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                current.Add(char.ToLowerInvariant(character));
+                continue;
+            }
+
+            if (current.Count == 0)
+            {
+                continue;
+            }
+
+            parts.Add(new string(current.ToArray()));
+            current.Clear();
+        }
+
+        if (current.Count > 0)
+        {
+            parts.Add(new string(current.ToArray()));
+        }
+
+        return string.Join(" ", parts);
     }
 
     private static bool ValidateShortcut(HotkeyGesture hotkey, string label, out string error)
@@ -1738,6 +1882,25 @@ internal partial class SettingsWindow : Window
         if (this.ReplacementRulesDataGrid.SelectedItem is TranscriptReplacementRule selected)
         {
             this.transcriptReplacementRules.Remove(selected);
+        }
+    }
+
+    private void OnAddVoiceShellCommandClick(object sender, RoutedEventArgs e)
+    {
+        var command = new VoiceShellCommand
+        {
+            Enabled = true,
+            CompletionBehavior = VoiceShellCommandCompletionBehavior.Stop
+        };
+        this.voiceShellCommands.Add(command);
+        this.VoiceShellCommandsDataGrid.SelectedItem = command;
+    }
+
+    private void OnRemoveVoiceShellCommandClick(object sender, RoutedEventArgs e)
+    {
+        if (this.VoiceShellCommandsDataGrid.SelectedItem is VoiceShellCommand selected)
+        {
+            this.voiceShellCommands.Remove(selected);
         }
     }
 
@@ -2023,6 +2186,35 @@ internal partial class SettingsWindow : Window
         this.CaptureStopHotkeyButton.Content = "Change";
         this.CaptureHistoryHotkeyButton.Content = "Change";
     }
+
+    private LaunchAtLoginScope GetSelectedLaunchAtLoginScope()
+    {
+        var tag = (this.LaunchAtLoginComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+        return Enum.TryParse<LaunchAtLoginScope>(tag, out var scope)
+            ? scope
+            : LaunchAtLoginScope.CurrentUser;
+    }
+
+    private static LaunchAtLoginScope ResolveLaunchAtLoginScope(LaunchAtLoginScope configuredScope)
+    {
+        if (configuredScope != LaunchAtLoginScope.NotConfigured)
+        {
+            return configuredScope;
+        }
+
+        var installedScope = LaunchAtLoginManager.GetConfiguredScope();
+        return installedScope == LaunchAtLoginScope.Disabled
+            ? LaunchAtLoginScope.CurrentUser
+            : installedScope;
+    }
+
+    private static int GetLaunchAtLoginComboBoxIndex(LaunchAtLoginScope scope) =>
+        scope switch
+        {
+            LaunchAtLoginScope.Disabled => 0,
+            LaunchAtLoginScope.AllUsers => 2,
+            _ => 1
+        };
 
     private static string GetHotkeyTargetLabel(HotkeyCaptureTarget target) =>
         target switch

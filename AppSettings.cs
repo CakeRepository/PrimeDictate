@@ -23,7 +23,12 @@ internal sealed class AppSettings
 
     public string VoiceHistoryPhrase { get; set; } = "show me the money";
 
+    public List<VoiceShellCommand> VoiceShellCommands { get; set; } = new();
+
     public TrayClickBehavior TrayClickBehavior { get; set; } = TrayClickBehavior.DoubleClickOpensSettings;
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public LaunchAtLoginScope LaunchAtLoginScope { get; set; } = LaunchAtLoginScope.NotConfigured;
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public TranscriptionBackendKind TranscriptionBackend { get; set; } = TranscriptionBackendKind.Whisper;
@@ -79,7 +84,9 @@ internal sealed class AppSettings
         EnableVoiceCommands = true,
         VoiceStopPhrase = "potato farmer",
         VoiceHistoryPhrase = "show me the money",
+        VoiceShellCommands = new List<VoiceShellCommand>(),
         TrayClickBehavior = TrayClickBehavior.DoubleClickOpensSettings,
+        LaunchAtLoginScope = LaunchAtLoginScope.NotConfigured,
         TranscriptionBackend = TranscriptionBackendKind.Whisper,
         TranscriptionComputeInterface = TranscriptionComputeInterface.Cpu,
         SelectedModelId = null,
@@ -109,10 +116,36 @@ internal sealed class TranscriptReplacementRule
     public string Replace { get; set; } = "";
 }
 
+internal sealed class VoiceShellCommand
+{
+    public bool Enabled { get; set; } = true;
+
+    public string Phrase { get; set; } = "";
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public VoiceShellCommandCompletionBehavior CompletionBehavior { get; set; } = VoiceShellCommandCompletionBehavior.Stop;
+
+    public string Command { get; set; } = "";
+}
+
+internal enum VoiceShellCommandCompletionBehavior
+{
+    Stop = 0,
+    Continue = 1
+}
+
 internal enum TrayClickBehavior
 {
     SingleClickOpensSettings = 0,
     DoubleClickOpensSettings = 1
+}
+
+internal enum LaunchAtLoginScope
+{
+    NotConfigured = 0,
+    Disabled = 1,
+    CurrentUser = 2,
+    AllUsers = 3
 }
 
 internal enum TranscriptionBackendKind

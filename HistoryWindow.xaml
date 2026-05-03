@@ -45,16 +45,78 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <DockPanel Grid.Row="0" Margin="0,0,0,10">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                <TextBlock Margin="0,0,8,0"
-                           VerticalAlignment="Center"
-                           Text="Filter" />
-                <ComboBox Width="170"
-                          ItemsSource="{Binding Filters}"
-                          SelectedItem="{Binding SelectedFilter, Mode=TwoWay}" />
-            </StackPanel>
-        </DockPanel>
+                <Grid Grid.Row="0" Margin="0,0,0,10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock VerticalAlignment="Center"
+                               Text="Search" />
+                    <TextBox x:Name="SearchTextBox"
+                             Grid.Column="1"
+                             Margin="8,0,12,0"
+                             MinWidth="240"
+                             Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Search final and original transcript text" />
+                    <TextBlock Grid.Column="2"
+                               Margin="0,0,12,0"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               Text="{Binding ResultSummary}" />
+                    <Button Grid.Column="3"
+                            Width="76"
+                            Content="Clear"
+                            IsEnabled="{Binding HasActiveRetrievalFilters}"
+                            Click="OnClearRetrievalClick" />
+
+                    <Grid Grid.Row="1"
+                          Grid.ColumnSpan="4"
+                          Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="190" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock VerticalAlignment="Center"
+                                   Text="Status" />
+                        <ComboBox Grid.Column="1"
+                                  Margin="8,0,0,0"
+                                  ItemsSource="{Binding Filters}"
+                                  SelectedItem="{Binding SelectedFilter, Mode=TwoWay}" />
+
+                        <TextBlock Grid.Column="3"
+                                   VerticalAlignment="Center"
+                                   Text="App" />
+                        <ComboBox Grid.Column="4"
+                                  Margin="8,0,0,0"
+                                  DisplayMemberPath="DisplayName"
+                                  ItemsSource="{Binding TargetAppOptions}"
+                                  SelectedItem="{Binding SelectedTargetApp, Mode=TwoWay}" />
+
+                        <TextBlock Grid.Column="6"
+                                   VerticalAlignment="Center"
+                                   Text="Window" />
+                        <ComboBox Grid.Column="7"
+                                  Margin="8,0,0,0"
+                                  DisplayMemberPath="DisplayName"
+                                  ItemsSource="{Binding TargetWindowOptions}"
+                                  SelectedItem="{Binding SelectedTargetWindow, Mode=TwoWay}"
+                                  MaxDropDownHeight="320" />
+                    </Grid>
+                </Grid>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
@@ -90,7 +152,7 @@
                                     <TextBlock Margin="0,3,0,0"
                                                FontSize="12"
                                                Foreground="{StaticResource TextSecondaryBrush}"
-                                               Text="{Binding TargetDisplayName, TargetNullValue=Unknown target}" />
+                                               Text="{Binding TargetSummary}" />
                                     <TextBlock Margin="0,4,0,0"
                                                FontSize="12"
                                                TextTrimming="CharacterEllipsis"
@@ -125,7 +187,9 @@
                         <TextBlock Margin="0,2,0,0"
                                    Text="{Binding SelectedEntry.DeliveryStatus, StringFormat=Delivery: {0}}" />
                         <TextBlock Margin="0,2,0,0"
-                                   Text="{Binding SelectedEntry.TargetDisplayName, TargetNullValue=Target: Unknown, StringFormat=Target: {0}}" />
+                                   Text="{Binding SelectedEntry.TargetAppDisplayName, StringFormat=Target app: {0}}" />
+                        <TextBlock Margin="0,2,0,0"
+                                   Text="{Binding SelectedEntry.TargetWindowDisplayName, StringFormat=Target window: {0}}" />
                         <TextBlock Margin="0,2,0,0"
                                    Text="{Binding SelectedEntry.AudioDurationSeconds, StringFormat=Audio: {0:N1}s}" />
                         <TextBlock Margin="0,2,0,0"

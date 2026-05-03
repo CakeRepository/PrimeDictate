@@ -51,7 +51,7 @@
                            Margin="0,0,0,0"
                            Foreground="{StaticResource TextSecondaryBrush}"
                            TextWrapping="Wrap"
-                           Text="Manage your local model, hotkey, and dictation behavior." />
+                           Text="Manage your local model, commands, and dictation behavior." />
 
                 <TabControl Name="SetupTabControl"
                             Grid.Row="1"
@@ -119,6 +119,28 @@
                                 <Run Text="Choose silence auto-commit timing, optional coding-mode Enter, and mic capture behavior for your workflow." />
                             </TextBlock>
                         </Border>
+
+                        <StackPanel Margin="0,22,0,0">
+                            <TextBlock Text="General dictation behavior" FontWeight="SemiBold" />
+                            <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                                <TextBlock VerticalAlignment="Center" Text="Commit after" />
+                                <TextBox Name="AutoCommitSilenceSecondsTextBox"
+                                         Width="48"
+                                         Margin="8,0,8,0"
+                                         VerticalContentAlignment="Center" />
+                                <TextBlock VerticalAlignment="Center" Text="seconds of silence" />
+                            </StackPanel>
+                            <CheckBox Name="SendEnterAfterCommitCheckBox"
+                                      Margin="0,10,0,0"
+                                      Content="Send Enter after committing transcript" />
+                            <CheckBox Name="PlayAudioCuesCheckBox"
+                                      Margin="0,10,0,0"
+                                      Content="Play start and stop tones" />
+                            <TextBlock Margin="0,8,0,0"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       TextWrapping="Wrap"
+                                       Text="Emergency stop shortcuts and stop phrases discard the active capture without typing text. Use silence auto-commit or the start / stop shortcut when you want to commit." />
+                        </StackPanel>
 
                         <TextBlock Name="WelcomeFooterText"
                                    Margin="0,18,0,0"
@@ -258,77 +280,117 @@
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem Name="PreferencesTab" Header="Shortcuts">
+            <TabItem Name="PreferencesTab" Header="Commands">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="14">
                         <TextBlock FontSize="15"
                                    FontWeight="SemiBold"
-                                   Text="Keyboard and voice shortcuts" />
+                                   Text="Keyboard, voice, and computer commands" />
                         <TextBlock Margin="0,8,0,0"
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    TextWrapping="Wrap"
-                                   Text="Use a global shortcut to start dictation, an emergency stop shortcut when you want to discard capture, and a history shortcut to recover recent transcripts." />
+                                   Text="Configure the phrases and keyboard shortcuts that control dictation, open history, or run local command prompt actions." />
 
-                        <Grid Margin="0,16,0,0">
+                        <CheckBox Name="EnableVoiceCommandsCheckBox"
+                                  Margin="0,14,0,0"
+                                  Content="Listen for command phrases while dictating" />
+
+                        <Grid Margin="0,12,0,0">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="155" />
+                                <ColumnDefinition Width="128" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="150" />
-                                <ColumnDefinition Width="112" />
+                                <ColumnDefinition Width="96" />
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
                             <TextBlock Grid.Row="0"
-                                       VerticalAlignment="Center"
                                        FontWeight="SemiBold"
-                                       Text="Start / stop dictation" />
-                            <TextBlock Name="DictationHotkeyValueText"
-                                       Grid.Row="0"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       Text="Command" />
+                            <TextBlock Grid.Row="0"
                                        Grid.Column="1"
-                                       VerticalAlignment="Center" />
-                            <Button Name="CaptureDictationHotkeyButton"
-                                    Grid.Row="0"
-                                    Grid.Column="2"
-                                    Width="96"
-                                    Content="Change"
-                                    Tag="Dictation"
-                                    Click="OnCaptureHotkeyClick" />
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       Text="Keyboard" />
+                            <TextBlock Grid.Row="0"
+                                       Grid.Column="2"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       Text="Voice phrase" />
 
                             <TextBlock Grid.Row="1"
                                        Margin="0,10,0,0"
                                        VerticalAlignment="Center"
                                        FontWeight="SemiBold"
-                                       Text="Emergency stop" />
-                            <TextBlock Name="StopHotkeyValueText"
+                                       Text="Start / stop dictation" />
+                            <TextBlock Name="DictationHotkeyValueText"
                                        Grid.Row="1"
                                        Grid.Column="1"
                                        Margin="0,10,0,0"
                                        VerticalAlignment="Center" />
-                            <Button Name="CaptureStopHotkeyButton"
+                            <TextBlock Grid.Row="1"
+                                       Grid.Column="2"
+                                       Margin="0,10,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       Text="Uses the keyboard toggle" />
+                            <Button Name="CaptureDictationHotkeyButton"
                                     Grid.Row="1"
-                                    Grid.Column="2"
+                                    Grid.Column="3"
                                     Width="96"
                                     Margin="0,10,0,0"
                                     Content="Change"
-                                    Tag="Stop"
+                                    Tag="Dictation"
                                     Click="OnCaptureHotkeyClick" />
 
                             <TextBlock Grid.Row="2"
                                        Margin="0,10,0,0"
                                        VerticalAlignment="Center"
                                        FontWeight="SemiBold"
-                                       Text="Open history" />
-                            <TextBlock Name="HistoryHotkeyValueText"
+                                       Text="Emergency stop" />
+                            <TextBlock Name="StopHotkeyValueText"
                                        Grid.Row="2"
                                        Grid.Column="1"
                                        Margin="0,10,0,0"
                                        VerticalAlignment="Center" />
-                            <Button Name="CaptureHistoryHotkeyButton"
+                            <TextBox Name="VoiceStopPhraseTextBox"
+                                     Grid.Row="2"
+                                     Grid.Column="2"
+                                     Margin="0,10,8,0"
+                                     VerticalContentAlignment="Center" />
+                            <Button Name="CaptureStopHotkeyButton"
                                     Grid.Row="2"
-                                    Grid.Column="2"
+                                    Grid.Column="3"
+                                    Width="96"
+                                    Margin="0,10,0,0"
+                                    Content="Change"
+                                    Tag="Stop"
+                                    Click="OnCaptureHotkeyClick" />
+
+                            <TextBlock Grid.Row="3"
+                                       Margin="0,10,0,0"
+                                       VerticalAlignment="Center"
+                                       FontWeight="SemiBold"
+                                       Text="Open history" />
+                            <TextBlock Name="HistoryHotkeyValueText"
+                                       Grid.Row="3"
+                                       Grid.Column="1"
+                                       Margin="0,10,0,0"
+                                       VerticalAlignment="Center" />
+                            <TextBox Name="VoiceHistoryPhraseTextBox"
+                                     Grid.Row="3"
+                                     Grid.Column="2"
+                                     Margin="0,10,8,0"
+                                     VerticalContentAlignment="Center" />
+                            <Button Name="CaptureHistoryHotkeyButton"
+                                    Grid.Row="3"
+                                    Grid.Column="3"
                                     Width="96"
                                     Margin="0,10,0,0"
                                     Content="Change"
@@ -341,56 +403,46 @@
                                    Text="Click Change, then press Ctrl/Shift/Alt plus a key." />
 
                         <StackPanel Margin="0,22,0,0">
-                            <TextBlock FontWeight="SemiBold" Text="Voice commands" />
-                            <CheckBox Name="EnableVoiceCommandsCheckBox"
-                                      Margin="0,8,0,0"
-                                      Content="Listen for command phrases while dictating" />
-                            <Grid Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <TextBlock Grid.Row="0" VerticalAlignment="Center" Text="Stop phrase" />
-                                <TextBox Name="VoiceStopPhraseTextBox"
-                                         Grid.Row="0"
-                                         Grid.Column="1"
-                                         VerticalContentAlignment="Center" />
-                                <TextBlock Grid.Row="1"
-                                           Margin="0,8,0,0"
-                                           VerticalAlignment="Center"
-                                           Text="History phrase" />
-                                <TextBox Name="VoiceHistoryPhraseTextBox"
-                                         Grid.Row="1"
-                                         Grid.Column="1"
-                                         Margin="0,8,0,0"
-                                         VerticalContentAlignment="Center" />
-                            </Grid>
-                        </StackPanel>
-
-                        <StackPanel Margin="0,22,0,0">
-                            <TextBlock Text="Commit behavior" FontWeight="SemiBold" />
-                            <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
-                                <TextBlock VerticalAlignment="Center" Text="Commit after" />
-                                <TextBox Name="AutoCommitSilenceSecondsTextBox"
-                                         Width="48"
-                                         Margin="8,0,8,0"
-                                         VerticalContentAlignment="Center" />
-                                <TextBlock VerticalAlignment="Center" Text="seconds of silence" />
-                            </StackPanel>
-                            <CheckBox Name="SendEnterAfterCommitCheckBox"
-                                      Margin="0,10,0,0"
-                                      Content="Send Enter after committing transcript" />
-                            <CheckBox Name="PlayAudioCuesCheckBox"
-                                      Margin="0,10,0,0"
-                                      Content="Play start and stop tones" />
-                            <TextBlock Margin="0,8,0,0"
+                            <TextBlock Margin="0,16,0,0"
+                                       FontWeight="SemiBold"
+                                       Text="Computer commands" />
+                            <TextBlock Margin="0,6,0,0"
                                        Foreground="{StaticResource TextMutedBrush}"
                                        TextWrapping="Wrap"
-                                       Text="Emergency stop shortcuts and stop phrases discard the active capture without typing text. Use silence auto-commit or the start / stop shortcut when you want to commit." />
+                                       Text="Say a phrase anywhere in the final transcript. Stop runs the command and ends the commit; Continue removes the phrase and commits the remaining dictated text." />
+                            <DataGrid Name="VoiceShellCommandsDataGrid"
+                                      Height="170"
+                                      Margin="0,10,0,0"
+                                      AutoGenerateColumns="False"
+                                      CanUserAddRows="False"
+                                      HeadersVisibility="Column">
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Header="On"
+                                                            Binding="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}"
+                                                            Width="54" />
+                                    <DataGridTextColumn Header="Say"
+                                                        Binding="{Binding Phrase, UpdateSourceTrigger=PropertyChanged}"
+                                                        Width="*" />
+                                    <DataGridComboBoxColumn x:Name="VoiceShellCommandBehaviorColumn"
+                                                            Header="After"
+                                                            SelectedItemBinding="{Binding CompletionBehavior, UpdateSourceTrigger=PropertyChanged}"
+                                                            Width="96" />
+                                    <DataGridTextColumn Header="Command Prompt command"
+                                                        Binding="{Binding Command, UpdateSourceTrigger=PropertyChanged}"
+                                                        Width="2*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                            <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
+                                <Button Name="AddVoiceShellCommandButton"
+                                        Width="112"
+                                        Content="Add command"
+                                        Click="OnAddVoiceShellCommandClick" />
+                                <Button Name="RemoveVoiceShellCommandButton"
+                                        Width="120"
+                                        Margin="10,0,0,0"
+                                        Content="Remove selected"
+                                        Click="OnRemoveVoiceShellCommandClick" />
+                            </StackPanel>
                         </StackPanel>
 
                         <Expander Margin="0,22,0,0"
@@ -404,6 +456,19 @@
                                     <ComboBoxItem Content="Single click opens Workspace" Tag="Single" />
                                     <ComboBoxItem Content="Double click opens Workspace" Tag="Double" />
                                 </ComboBox>
+
+                                <TextBlock Margin="0,16,0,0" Text="Start with Windows" FontWeight="SemiBold" />
+                                <ComboBox Name="LaunchAtLoginComboBox"
+                                          Margin="0,6,0,0"
+                                          SelectedIndex="1">
+                                    <ComboBoxItem Content="Off" Tag="Disabled" />
+                                    <ComboBoxItem Content="Current user" Tag="CurrentUser" />
+                                    <ComboBoxItem Content="All users" Tag="AllUsers" />
+                                </ComboBox>
+                                <TextBlock Margin="0,6,0,0"
+                                           Foreground="{StaticResource TextMutedBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="Current user writes shell:startup. All users writes shell:common startup and may ask for administrator approval." />
 
                                 <TextBlock Margin="0,16,0,0" Text="Microphone" FontWeight="SemiBold" />
                                 <ComboBox Name="InputDeviceComboBox"

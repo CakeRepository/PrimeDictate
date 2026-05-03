@@ -1,14 +1,37 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <!-- Optional per-machine launch-at-login Run value. LAUNCHATLOGIN defaults to 1 in each package. -->
+  <!-- Optional per-machine launch-at-login Startup shortcut. LAUNCHATLOGIN defaults to 1 in each package. -->
   <Fragment>
-    <ComponentGroup Id="LaunchAtLoginComponents" Directory="INSTALLFOLDER">
-      <Component Id="LaunchAtLoginRunValue" Guid="8B4D72AA-4D19-41BB-A450-04CC9F14E78B" Condition="LAUNCHATLOGIN = &quot;1&quot;">
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="CommonMicrosoftFolder" Name="Microsoft">
+        <Directory Id="CommonWindowsFolder" Name="Windows">
+          <Directory Id="CommonStartMenuFolder" Name="Start Menu">
+            <Directory Id="CommonProgramsFolder" Name="Programs">
+              <Directory Id="CommonStartupShortcutFolder" Name="Startup" />
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="LaunchAtLoginComponents" Directory="CommonStartupShortcutFolder">
+      <Component Id="LaunchAtLoginStartupShortcut" Guid="E3D3A6D7-D830-4C10-9708-F6BA54BC8107" Condition="LAUNCHATLOGIN = &quot;1&quot;">
+        <Shortcut
+            Id="ScPrimeDictateStartup"
+            Name="PrimeDictate"
+            Target="[INSTALLFOLDER]PrimeDictate.exe"
+            Arguments="--from-login"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="AppIcon"
+            Description="Start PrimeDictate when Windows starts." />
+        <RemoveFile Id="RemovePrimeDictateStartupShortcut" Name="PrimeDictate.lnk" On="uninstall" />
         <RegistryValue
             Root="HKLM"
-            Key="Software\Microsoft\Windows\CurrentVersion\Run"
-            Name="PrimeDictate"
-            Type="string"
-            Value="&quot;[INSTALLFOLDER]PrimeDictate.exe&quot; --from-login"
+            Key="Software\PrimeDictate"
+            Name="CommonStartupShortcut"
+            Type="integer"
+            Value="1"
             KeyPath="yes" />
       </Component>
     </ComponentGroup>

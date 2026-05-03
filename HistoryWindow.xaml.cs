@@ -9,6 +9,7 @@ internal partial class HistoryWindow : Window
     {
         InitializeComponent();
         this.DataContext = viewModel;
+        this.Loaded += (_, _) => this.SearchTextBox.Focus();
     }
 
     private void OnCopyTranscriptClick(object sender, RoutedEventArgs e)
@@ -32,7 +33,8 @@ internal partial class HistoryWindow : Window
         sb.AppendLine($"Timestamp (UTC): {entry.TimestampUtc:O}");
         sb.AppendLine($"Thread: {entry.ThreadId}");
         sb.AppendLine($"Delivery: {entry.DeliveryStatus}");
-        sb.AppendLine($"Target: {entry.TargetDisplayName ?? "Unknown"}");
+        sb.AppendLine($"Target app: {entry.TargetAppDisplayName}");
+        sb.AppendLine($"Target window: {entry.TargetWindowDisplayName}");
         sb.AppendLine($"Audio seconds: {entry.AudioDurationSeconds:N1}");
         if (!string.IsNullOrWhiteSpace(entry.Error))
         {
@@ -54,6 +56,14 @@ internal partial class HistoryWindow : Window
         sb.AppendLine();
         sb.AppendLine(entry.Transcript);
         System.Windows.Clipboard.SetText(sb.ToString());
+    }
+
+    private void OnClearRetrievalClick(object sender, RoutedEventArgs e)
+    {
+        if (this.DataContext is TranscriptionHistoryViewModel viewModel)
+        {
+            viewModel.ClearRetrievalFilters();
+        }
     }
 
     private void OnTitleBarMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)

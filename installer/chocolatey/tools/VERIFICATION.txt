@@ -1,19 +1,18 @@
 VERIFICATION
 Verification is intended to assist package reviewers and future maintainers.
 
-1. Download the official release installer from:
-   https://github.com/CakeRepository/PrimeDictate/releases/download/v3.1.2/PrimeDictate-Setup-v3.1.2.msi
+1. Download the official release installers for the package version from:
+   https://github.com/CakeRepository/PrimeDictate/releases
 
-2. Compute SHA256 checksum of the downloaded MSI.
-   Expected SHA256:
-   24b61ee4c0ca6c1cb68314b1d9f5e51590b4b94fefa65139e61bafb7623bf219
+2. Compute SHA256 checksums of the downloaded x64 and ARM64 MSIs.
 
-3. Compare with the MSI bundled in this package:
-   tools\PrimeDictate-Online.msi
+3. Compare the computed checksums with the checksum values embedded in:
+   tools\chocolateyInstall.ps1
 
 4. This package is built from source and release automation in:
    https://github.com/CakeRepository/PrimeDictate
 
 Notes:
-- The Chocolatey package bundles the MSI to provide deterministic installs.
-- Release assets and checksums are published on GitHub Releases.
+- The Chocolatey package downloads release MSIs from GitHub instead of bundling them.
+- chocolateyInstall.ps1 selects the native ARM64 URL on ARM64 Windows and the x64 URL otherwise.
+- Chocolatey verifies each downloaded MSI with SHA256 before installing it.
