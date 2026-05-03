@@ -46,13 +46,20 @@ internal static class MoonshineModelCatalog
     public static IReadOnlyList<MoonshineModelOption> Options { get; } =
     [
         new(
+            Id: "moonshine-tiny-v2-en",
+            DisplayName: "Moonshine Tiny v2 (English)",
+            InstallDirectoryName: "sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27",
+            ArchiveFileName: "sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27.tar.bz2",
+            Description: "The latest Moonshine v2 Tiny model. Fast on CPU today; Qualcomm NPU use requires prepared QNN artifacts in the model folder.",
+            ApproximateBytes: 83_886_080,
+            Recommended: true),
+        new(
             Id: "moonshine-base-en",
-            DisplayName: "Moonshine Base (English)",
+            DisplayName: "Moonshine Base (English) [v1]",
             InstallDirectoryName: "sherpa-onnx-moonshine-base-en-int8",
             ArchiveFileName: "sherpa-onnx-moonshine-base-en-int8.tar.bz2",
-            Description: "A compact sherpa-onnx Moonshine model focused on fast local English transcription. Good when you want another lightweight non-Whisper option alongside Parakeet.",
-            ApproximateBytes: 250_807_309,
-            Recommended: true)
+            Description: "The original Moonshine v1 model. Fast and reliable, using a 4-stage pipeline.",
+            ApproximateBytes: 250_807_309)
     ];
 
     internal static string GetManagedModelsDirectory() => ManagedModelsDirectory;
@@ -108,23 +115,121 @@ internal static class MoonshineModelCatalog
 
     internal static bool IsValidModelDirectory(string? directoryPath)
     {
+        return IsValidV1ModelDirectory(directoryPath) || IsValidV2ModelDirectory(directoryPath);
+    }
+
+    internal static bool IsValidV1ModelDirectory(string? directoryPath)
+    {
+        return TryResolveV1Files(directoryPath, out _);
+    }
+
+    internal static bool IsValidV2ModelDirectory(string? directoryPath)
+    {
+        return TryResolveV2Files(directoryPath, out _);
+    }
+
+    internal static bool HasPreparedQnnArtifacts(string? directoryPath)
+    {
         if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath))
         {
             return false;
         }
 
-        foreach (var requiredFile in GetRequiredFiles())
+        var qnnDirectory = Path.Combine(directoryPath, "qnn");
+        if (!Directory.Exists(qnnDirectory))
         {
-            if (!File.Exists(Path.Combine(directoryPath, requiredFile)))
-            {
-                return false;
-            }
+            return false;
         }
 
-        return true;
+        if (TryResolveV2Files(directoryPath, out var v2Files))
+        {
+            var encoderName = Path.GetFileName(v2Files.Value.Encoder);
+            var decoderName = Path.GetFileName(v2Files.Value.Decoder);
+            return FindFile(
+                    qnnDirectory,
+                    "encoder.qdq.onnx",
+                    "encoder.qnn.onnx",
+                    encoderName.Replace(".onnx", ".qdq.onnx", StringComparison.Ordinal).Replace(".ort", ".qdq.onnx", StringComparison.Ordinal),
+                    encoderName.Replace(".onnx", ".qnn.onnx", StringComparison.Ordinal).Replace(".ort", ".qnn.onnx", StringComparison.Ordinal)) is not null &&
+                FindFile(
+                    qnnDirectory,
+                    "decoder.qdq.onnx",
+                    "decoder.qnn.onnx",
+                    decoderName.Replace(".onnx", ".qdq.onnx", StringComparison.Ordinal).Replace(".ort", ".qdq.onnx", StringComparison.Ordinal),
+                    decoderName.Replace(".onnx", ".qnn.onnx", StringComparison.Ordinal).Replace(".ort", ".qnn.onnx", StringComparison.Ordinal)) is not null;
+        }
+
+        if (TryResolveV1Files(directoryPath, out _))
+        {
+            return FindFile(qnnDirectory, "preprocess.qdq.onnx", "preprocess.qnn.onnx") is not null &&
+                FindFile(qnnDirectory, "encode.qdq.onnx", "encode.qnn.onnx") is not null &&
+                FindFile(qnnDirectory, "uncached_decode.qdq.onnx", "uncached_decode.qnn.onnx") is not null &&
+                FindFile(qnnDirectory, "cached_decode.qdq.onnx", "cached_decode.qnn.onnx") is not null;
+        }
+
+        return false;
     }
 
-    internal static IReadOnlyList<string> GetRequiredFiles() =>
+    internal static bool TryResolveV1Files(
+        string? directoryPath,
+        [NotNullWhen(true)] out MoonshineV1Files? files)
+    {
+        files = null;
+        if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath)) return false;
+
+        var preprocess = FindFile(directoryPath, "preprocess.onnx", "preprocess.qdq.onnx");
+        var encode = FindFile(directoryPath, "encode.int8.onnx", "encode.onnx", "encoder.int8.onnx");
+        var uncached = FindFile(directoryPath, "uncached_decode.int8.onnx", "uncached_decode.onnx");
+        var cached = FindFile(directoryPath, "cached_decode.int8.onnx", "cached_decode.onnx");
+        var tokens = FindFile(directoryPath, "tokens.txt");
+
+        if (preprocess != null && encode != null && uncached != null && cached != null && tokens != null)
+        {
+            files = new MoonshineV1Files(preprocess, encode, uncached, cached, tokens);
+            return true;
+        }
+
+        return false;
+    }
+
+    internal static bool TryResolveV2Files(
+        string? directoryPath,
+        [NotNullWhen(true)] out MoonshineV2Files? files)
+    {
+        files = null;
+        if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath)) return false;
+
+        // Prioritize the exact names seen in the optimized HF models (.ort and .onnx)
+        var encoder = FindFile(directoryPath, 
+            "encoder_model.ort", "encoder_model_int8.ort", "encoder_model.onnx", "encoder_model_int8.onnx",
+            "encoder.int8.onnx", "encoder.onnx", "encode.int8.onnx", "encode.onnx");
+        
+        var decoder = FindFile(directoryPath, 
+            "decoder_model_merged.ort", "decoder_model_merged_int8.ort", "decoder_model_merged.onnx", "decoder_model_merged_int8.onnx",
+            "decoder.int8.onnx", "decoder.onnx", "merged_decoder.onnx", "decode.int8.onnx", "decode.onnx");
+        
+        var tokens = FindFile(directoryPath, "tokens.txt", "tokenizer.json", "vocab.txt");
+
+        if (encoder != null && decoder != null && tokens != null)
+        {
+            files = new MoonshineV2Files(encoder, decoder, tokens);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? FindFile(string directoryPath, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var path = Path.Combine(directoryPath, name);
+            if (File.Exists(path)) return path;
+        }
+        return null;
+    }
+
+    internal static IReadOnlyList<string> GetRequiredFilesV1() =>
     [
         "preprocess.onnx",
         "encode.int8.onnx",
@@ -132,6 +237,9 @@ internal static class MoonshineModelCatalog
         "cached_decode.int8.onnx",
         "tokens.txt"
     ];
+
+    internal static IReadOnlyList<string> GetRequiredFiles() =>
+        ["preprocess.onnx or encoder_model.ort", "decode model(s)", "tokens.txt"];
 }
 
 internal static class MoonshineModelDownloader
@@ -225,14 +333,22 @@ internal static class MoonshineModelDownloader
             progress?.Report(new MoonshineModelDownloadProgress("extract", bytesDownloaded, totalBytes));
             await ExtractArchiveAsync(archivePath, extractPath, cancellationToken).ConfigureAwait(false);
 
-            var extractedDirectory = Path.Combine(extractPath, option.InstallDirectoryName);
-            if (!MoonshineModelCatalog.IsValidModelDirectory(extractedDirectory))
+            var validExtractedDirectory = FindValidModelDirectory(extractPath);
+            if (validExtractedDirectory == null)
             {
+                var foundFiles = Directory.Exists(extractPath)
+                    ? string.Join(", ", Directory.EnumerateFiles(extractPath, "*", SearchOption.AllDirectories).Select(Path.GetFileName))
+                    : "None (extraction failed?)";
+
+                var expectedFiles = option.Id.Contains("v2", StringComparison.OrdinalIgnoreCase)
+                    ? "encoder_model.ort, decoder_model_merged.ort, tokens.txt"
+                    : "preprocess.onnx, encode.int8.onnx, uncached_decode.int8.onnx, cached_decode.int8.onnx, tokens.txt";
+
                 throw new InvalidOperationException(
-                    $"The extracted Moonshine model is incomplete. Expected {string.Join(", ", MoonshineModelCatalog.GetRequiredFiles())}.");
+                    $"The extracted Moonshine model is incomplete.\n\nExpected: {expectedFiles}\n\nFound: {foundFiles}");
             }
 
-            Directory.Move(extractedDirectory, destinationPath);
+            Directory.Move(validExtractedDirectory, destinationPath);
             progress?.Report(new MoonshineModelDownloadProgress("ready", bytesDownloaded, bytesDownloaded));
             completed = true;
             return destinationPath;
@@ -254,6 +370,24 @@ internal static class MoonshineModelDownloader
                 Directory.Delete(destinationPath, recursive: true);
             }
         }
+    }
+
+    private static string? FindValidModelDirectory(string rootPath)
+    {
+        if (MoonshineModelCatalog.IsValidModelDirectory(rootPath))
+        {
+            return rootPath;
+        }
+
+        foreach (var subDir in Directory.EnumerateDirectories(rootPath, "*", SearchOption.AllDirectories))
+        {
+            if (MoonshineModelCatalog.IsValidModelDirectory(subDir))
+            {
+                return subDir;
+            }
+        }
+
+        return null;
     }
 
     private static async Task ExtractArchiveAsync(string archivePath, string extractPath, CancellationToken cancellationToken)

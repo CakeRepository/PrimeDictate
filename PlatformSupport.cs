@@ -55,7 +55,8 @@ internal static class PlatformSupport
                 ? "Whisper.net GGML runs natively on ARM64 with CPU. GPU/NPU acceleration currently requires an x64 build."
                 : $"Whisper.net GGML can use CPU, but no supported GPU/NPU runtime was detected for {RuntimeInformation.ProcessArchitecture}.";
 
-    public static string QualcommQnnRuntimeSummary => QnnRuntimeSupport.GetAvailability().Summary;
+    public static string QualcommQnnRuntimeSummary =>
+        $"{QnnRuntimeSupport.GetAvailability().Summary} Qualcomm AI Hub Whisper packages use precompiled ONNX Runtime EPContext wrappers around QNN context binaries.";
 
     public static string WhisperNetGpuLabel
     {

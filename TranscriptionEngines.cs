@@ -128,7 +128,7 @@ internal sealed class TranscriptionEngineHost : IAsyncDisposable
 
     private static ITranscriptionEngine CreateEngine(TranscriptionBackendKind backend) => backend switch
     {
-        TranscriptionBackendKind.Moonshine => new MoonshineOnnxTranscriptionEngine(),
+        TranscriptionBackendKind.Moonshine => new MoonshineTranscriptionEngine(),
         TranscriptionBackendKind.Parakeet => new ParakeetOnnxTranscriptionEngine(),
         TranscriptionBackendKind.WhisperNet => new WhisperNetTranscriptionEngine(),
         TranscriptionBackendKind.QualcommQnn => new QualcommQnnTranscriptionEngine(),
@@ -137,10 +137,10 @@ internal sealed class TranscriptionEngineHost : IAsyncDisposable
 
     private static string GetBackendName(TranscriptionBackendKind backend) => backend switch
     {
-        TranscriptionBackendKind.Moonshine => "Moonshine ONNX",
+        TranscriptionBackendKind.Moonshine => "Moonshine Core (Pure ONNX)",
         TranscriptionBackendKind.Parakeet => "Parakeet ONNX",
         TranscriptionBackendKind.WhisperNet => "Whisper.net (GGML)",
-        TranscriptionBackendKind.QualcommQnn => "Qualcomm QNN (Experimental)",
+        TranscriptionBackendKind.QualcommQnn => "Qualcomm AI Hub Whisper QNN",
         _ => "Whisper ONNX"
     };
 
@@ -418,53 +418,6 @@ internal sealed class ParakeetOnnxTranscriptionEngine : SherpaOnnxTranscriptionE
         config.ModelConfig.ModelType = "nemo_transducer";
         config.DecodingMethod = "greedy_search";
         config.MaxActivePaths = 4;
-    }
-}
-
-internal sealed class MoonshineOnnxTranscriptionEngine : SherpaOnnxTranscriptionEngine
-{
-    public override TranscriptionBackendKind Backend => TranscriptionBackendKind.Moonshine;
-
-    public override string Name => "Moonshine ONNX";
-
-    protected override string ResolveModelDirectoryOrThrow(TranscriptionEngineConfiguration configuration)
-    {
-        if (MoonshineModelCatalog.TryResolveDirectory(configuration.ConfiguredModelPath, out var explicitDirectory))
-        {
-            return explicitDirectory;
-        }
-
-        if (!string.IsNullOrWhiteSpace(configuration.ConfiguredModelPath))
-        {
-            throw new FileNotFoundException(
-                "Moonshine model folder not found or incomplete. Pick a folder containing preprocess.onnx, encode.int8.onnx, uncached_decode.int8.onnx, cached_decode.int8.onnx, and tokens.txt.");
-        }
-
-        if (MoonshineModelCatalog.TryGetById(configuration.SelectedModelId, out var selectedOption) &&
-            MoonshineModelCatalog.TryResolveInstalledPath(selectedOption, out var selectedPath))
-        {
-            return selectedPath;
-        }
-
-        foreach (var option in MoonshineModelCatalog.Options)
-        {
-            if (MoonshineModelCatalog.TryResolveInstalledPath(option, out var installedPath))
-            {
-                return installedPath;
-            }
-        }
-
-        throw new FileNotFoundException(
-            "Moonshine model not found. Download one in onboarding or browse to a local Moonshine model folder.");
-    }
-
-    protected override void ConfigureRecognizer(OfflineRecognizerConfig config, string modelDirectory)
-    {
-        config.ModelConfig.Tokens = Path.Combine(modelDirectory, "tokens.txt");
-        config.ModelConfig.Moonshine.Preprocessor = Path.Combine(modelDirectory, "preprocess.onnx");
-        config.ModelConfig.Moonshine.Encoder = Path.Combine(modelDirectory, "encode.int8.onnx");
-        config.ModelConfig.Moonshine.UncachedDecoder = Path.Combine(modelDirectory, "uncached_decode.int8.onnx");
-        config.ModelConfig.Moonshine.CachedDecoder = Path.Combine(modelDirectory, "cached_decode.int8.onnx");
     }
 }
 

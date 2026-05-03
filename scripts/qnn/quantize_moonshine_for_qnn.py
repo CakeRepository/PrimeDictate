@@ -8,6 +8,12 @@ This is a maintainer-only offline tool. End-user runtime inference remains pure
 Expected calibration layout:
 
 <calibration-dir>/
+  encoder/              # Moonshine v2
+    sample-000.npz
+    ...
+  decoder/              # Moonshine v2 merged decoder
+    sample-000.npz
+    ...
   preprocess/
     sample-000.npz
     ...
@@ -28,6 +34,8 @@ capture logic into the quantizer itself.
 The script writes generated QDQ models to:
 
 <moonshine-model-dir>/qnn/
+  encoder.qdq.onnx       # Moonshine v2
+  decoder.qdq.onnx       # Moonshine v2
   preprocess.qdq.onnx
   encode.qdq.onnx
   uncached_decode.qdq.onnx
@@ -37,6 +45,9 @@ The script writes generated QDQ models to:
 Notes:
 - Best results typically come from quantizing float models. This scaffold will
   still attempt to preprocess and quantize the model files you point it at.
+- Moonshine v2 sherpa downloads currently ship optimized .ort runtime files.
+  ONNX Runtime's QNN quantization tools expect source .onnx files, so place
+  encoder_model.onnx and decoder_model_merged.onnx in --source-model-dir.
 - Calibration data should be captured from representative 16 kHz mono dictation
   inputs and, for decoder stages, representative intermediate tensors collected
   from a known-good CPU reference run.
@@ -48,7 +59,7 @@ import argparse
 import datetime as dt
 import json
 from pathlib import Path
-from typing import Dict, Iterator, List
+from typing import Dict, Iterator, List, Sequence
 
 import numpy as np
 import onnxruntime as ort
@@ -59,11 +70,38 @@ from onnxruntime.quantization.execution_providers.qnn import (
 )
 
 
-STAGES = {
-    "preprocess": "preprocess.onnx",
-    "encode": "encode.int8.onnx",
-    "uncached_decode": "uncached_decode.int8.onnx",
-    "cached_decode": "cached_decode.int8.onnx",
+STAGES_V1 = {
+    "preprocess": ("preprocess.qdq.onnx", ("preprocess.onnx",)),
+    "encode": ("encode.qdq.onnx", ("encode.onnx", "encode.int8.onnx")),
+    "uncached_decode": (
+        "uncached_decode.qdq.onnx",
+        ("uncached_decode.onnx", "uncached_decode.int8.onnx"),
+    ),
+    "cached_decode": (
+        "cached_decode.qdq.onnx",
+        ("cached_decode.onnx", "cached_decode.int8.onnx"),
+    ),
+}
+
+STAGES_V2 = {
+    "encoder": (
+        "encoder.qdq.onnx",
+        (
+            "encoder_model.onnx",
+            "encoder_model_fp16.onnx",
+            "encoder_model_int8.onnx",
+            "encoder_model_quantized.onnx",
+        ),
+    ),
+    "decoder": (
+        "decoder.qdq.onnx",
+        (
+            "decoder_model_merged.onnx",
+            "decoder_model_merged_fp16.onnx",
+            "decoder_model_merged_int8.onnx",
+            "decoder_model_merged_quantized.onnx",
+        ),
+    ),
 }
 
 
@@ -113,12 +151,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-dir",
         required=True,
-        help="Path to the Moonshine model directory containing preprocess/encode/decode/tokens files",
+        help="Path to the installed Moonshine model directory where qnn artifacts will be written",
+    )
+    parser.add_argument(
+        "--source-model-dir",
+        help=(
+            "Optional path to source ONNX files. Required for Moonshine v2 if "
+            "--model-dir only contains sherpa .ort files."
+        ),
     )
     parser.add_argument(
         "--calibration-dir",
         required=True,
-        help="Path to the root calibration directory with preprocess/encode/uncached_decode/cached_decode subfolders",
+        help="Path to the root calibration directory with stage subfolders",
     )
     parser.add_argument(
         "--activation-type",
@@ -144,19 +189,62 @@ def to_quant_type(value: str) -> QuantType:
     return mapping[value]
 
 
-def ensure_stage_inputs(model_dir: Path, calibration_dir: Path) -> Iterator[tuple[str, Path, Path]]:
-    for stage, file_name in STAGES.items():
-        model_path = model_dir / file_name
-        if not model_path.is_file():
-            raise FileNotFoundError(f"Required Moonshine stage model not found: {model_path}")
+def find_first_existing(directory: Path, names: Sequence[str]) -> Path | None:
+    for name in names:
+        path = directory / name
+        if path.is_file():
+            return path
+
+    return None
+
+
+def ensure_stage_inputs(
+    model_dir: Path,
+    source_model_dir: Path,
+    calibration_dir: Path,
+) -> Iterator[tuple[str, Path, Path, Path]]:
+    if find_first_existing(source_model_dir, STAGES_V2["encoder"][1]) and find_first_existing(
+        source_model_dir,
+        STAGES_V2["decoder"][1],
+    ):
+        print("Detected Moonshine v2 (2-stage) model layout")
+        stages = STAGES_V2
+    elif (model_dir / "encoder_model.ort").is_file() and (
+        model_dir / "decoder_model_merged.ort"
+    ).is_file():
+        raise FileNotFoundError(
+            "Moonshine v2 source ONNX files were not found. The installed sherpa "
+            "folder contains encoder_model.ort and decoder_model_merged.ort, but "
+            "QNN quantization needs encoder_model.onnx and decoder_model_merged.onnx. "
+            "Download/export those source ONNX files and pass their directory with "
+            "--source-model-dir."
+        )
+    else:
+        print("Detected Moonshine v1 (4-stage) model layout")
+        stages = STAGES_V1
+
+    for stage, (output_file_name, candidate_names) in stages.items():
+        model_path = find_first_existing(source_model_dir, candidate_names)
+        if model_path is None:
+            expected = ", ".join(candidate_names)
+            raise FileNotFoundError(
+                f"Required Moonshine stage model not found for '{stage}' under "
+                f"{source_model_dir}. Expected one of: {expected}"
+            )
 
         samples_dir = calibration_dir / stage
-        yield stage, model_path, samples_dir
+        output_path = model_dir / "qnn" / output_file_name
+        yield stage, model_path, samples_dir, output_path
 
 
 def main() -> None:
     args = parse_args()
     model_dir = Path(args.model_dir).expanduser().resolve()
+    source_model_dir = (
+        Path(args.source_model_dir).expanduser().resolve()
+        if args.source_model_dir
+        else model_dir
+    )
     calibration_dir = Path(args.calibration_dir).expanduser().resolve()
     output_dir = model_dir / "qnn"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -168,18 +256,22 @@ def main() -> None:
         "generated_utc": dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
         "onnxruntime_version": ort.__version__,
         "source_model_dir": str(model_dir),
+        "source_onnx_dir": str(source_model_dir),
         "calibration_dir": str(calibration_dir),
         "activation_type": args.activation_type,
         "weight_type": args.weight_type,
         "stages": {},
     }
 
-    for stage, model_path, samples_dir in ensure_stage_inputs(model_dir, calibration_dir):
+    for stage, model_path, samples_dir, qdq_path in ensure_stage_inputs(
+        model_dir,
+        source_model_dir,
+        calibration_dir,
+    ):
         print(f"Preparing {stage}: {model_path.name}")
         reader = NpzCalibrationDataReader(model_path, samples_dir)
 
         preprocessed_path = output_dir / f"{stage}.preprocessed.onnx"
-        qdq_path = output_dir / f"{stage}.qdq.onnx"
 
         model_changed = qnn_preprocess_model(str(model_path), str(preprocessed_path))
         model_to_quantize = preprocessed_path if model_changed else model_path

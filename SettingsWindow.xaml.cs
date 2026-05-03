@@ -46,8 +46,8 @@ internal partial class SettingsWindow : Window
             "Native Whisper.net GGML models with GPU support through CUDA/Vulkan, optional OpenVINO NPU sidecars, and access to larger V3 models."),
         new(
             TranscriptionBackendKind.QualcommQnn,
-            "Qualcomm QNN (Experimental)",
-            "Experimental Moonshine backend driven by ONNX Runtime QNN on native Windows ARM64. Uses strict QNN HTP validation when available and falls back to pure ONNX Runtime CPU only when strict validation is off.")
+            "Qualcomm AI Hub Whisper QNN",
+            "Experimental Qualcomm AI Hub Whisper backend driven by ONNX Runtime QNN on native Windows ARM64. Uses precompiled EPContext ONNX wrappers around QNN context binaries and disables CPU fallback for NPU sessions.")
     ];
 
     private bool isCapturingHotkey;
@@ -213,7 +213,7 @@ internal partial class SettingsWindow : Window
         {
             TranscriptionBackendKind.Moonshine => SelectMoonshineModel(preferredModelId, configuredModelPath),
             TranscriptionBackendKind.Parakeet => SelectParakeetModel(preferredModelId, configuredModelPath),
-            TranscriptionBackendKind.QualcommQnn => SelectMoonshineModel(preferredModelId, configuredModelPath),
+            TranscriptionBackendKind.QualcommQnn => SelectQualcommAihubWhisperModel(preferredModelId, configuredModelPath),
             TranscriptionBackendKind.WhisperNet => SelectWhisperNetModel(preferredModelId, configuredModelPath),
             _ => SelectWhisperModel(preferredModelId, configuredModelPath)
         };
@@ -225,7 +225,7 @@ internal partial class SettingsWindow : Window
         {
             TranscriptionBackendKind.Moonshine => MoonshineModelCatalog.Options,
             TranscriptionBackendKind.Parakeet => ParakeetModelCatalog.Options,
-            TranscriptionBackendKind.QualcommQnn => MoonshineModelCatalog.Options,
+            TranscriptionBackendKind.QualcommQnn => QualcommAihubWhisperModelCatalog.Options,
             TranscriptionBackendKind.WhisperNet => WhisperNetModelCatalog.Options,
             _ => WhisperModelCatalog.Options
         };
@@ -236,7 +236,7 @@ internal partial class SettingsWindow : Window
         {
             TranscriptionBackendKind.Moonshine => ResolveInitialMoonshinePath(selectedOption as MoonshineModelOption, configuredModelPath),
             TranscriptionBackendKind.Parakeet => ResolveInitialParakeetPath(selectedOption as ParakeetModelOption, configuredModelPath),
-            TranscriptionBackendKind.QualcommQnn => ResolveInitialMoonshinePath(selectedOption as MoonshineModelOption, configuredModelPath),
+            TranscriptionBackendKind.QualcommQnn => ResolveInitialQualcommAihubWhisperPath(selectedOption as QualcommAihubWhisperModelOption, configuredModelPath),
             TranscriptionBackendKind.WhisperNet => ResolveInitialWhisperNetPath(selectedOption as WhisperNetModelOption, configuredModelPath),
             _ => ResolveInitialWhisperPath(selectedOption as WhisperModelOption, configuredModelPath)
         };
@@ -292,6 +292,21 @@ internal partial class SettingsWindow : Window
             ?? MoonshineModelCatalog.Options.First();
     }
 
+    private static QualcommAihubWhisperModelOption SelectQualcommAihubWhisperModel(string? preferredModelId, string? configuredModelPath)
+    {
+        var optionFromPath = QualcommAihubWhisperModelCatalog.TryGetByPath(configuredModelPath);
+        if (QualcommAihubWhisperModelCatalog.TryGetById(preferredModelId, out var preferredOption))
+        {
+            return preferredOption;
+        }
+
+        return optionFromPath
+            ?? QualcommAihubWhisperModelCatalog.Options.FirstOrDefault(option => option.Recommended && QualcommAihubWhisperModelCatalog.TryResolveInstalledPath(option, out _))
+            ?? QualcommAihubWhisperModelCatalog.Options.FirstOrDefault(option => QualcommAihubWhisperModelCatalog.TryResolveInstalledPath(option, out _))
+            ?? QualcommAihubWhisperModelCatalog.Options.FirstOrDefault(option => option.Recommended)
+            ?? QualcommAihubWhisperModelCatalog.Options.First();
+    }
+
     private static WhisperNetModelOption SelectWhisperNetModel(string? preferredModelId, string? configuredModelPath)
     {
         var optionFromPath = WhisperNetModelCatalog.TryGetByPath(configuredModelPath);
@@ -345,6 +360,21 @@ internal partial class SettingsWindow : Window
         }
 
         if (option is not null && MoonshineModelCatalog.TryResolveInstalledPath(option, out var installedPath))
+        {
+            return installedPath;
+        }
+
+        return string.Empty;
+    }
+
+    private static string ResolveInitialQualcommAihubWhisperPath(QualcommAihubWhisperModelOption? option, string? configuredModelPath)
+    {
+        if (QualcommAihubWhisperModelCatalog.TryResolveDirectory(configuredModelPath, out var resolvedConfiguredPath))
+        {
+            return resolvedConfiguredPath;
+        }
+
+        if (option is not null && QualcommAihubWhisperModelCatalog.TryResolveInstalledPath(option, out var installedPath))
         {
             return installedPath;
         }
@@ -444,8 +474,10 @@ internal partial class SettingsWindow : Window
             switch (this.currentBackend)
             {
                 case TranscriptionBackendKind.Moonshine:
-                case TranscriptionBackendKind.QualcommQnn:
                     await this.DownloadSelectedMoonshineModelAsync(this.modelDownloadCts.Token).ConfigureAwait(true);
+                    break;
+                case TranscriptionBackendKind.QualcommQnn:
+                    await this.DownloadSelectedQualcommAihubWhisperModelAsync(this.modelDownloadCts.Token).ConfigureAwait(true);
                     break;
                 case TranscriptionBackendKind.Parakeet:
                     await this.DownloadSelectedParakeetModelAsync(this.modelDownloadCts.Token).ConfigureAwait(true);
@@ -510,6 +542,42 @@ internal partial class SettingsWindow : Window
         });
 
         var downloadedPath = await WhisperModelDownloader
+            .DownloadAsync(option, progress, cancellationToken)
+            .ConfigureAwait(true);
+
+        this.SetModelPathText(downloadedPath);
+        this.ModelDownloadProgressBar.IsIndeterminate = false;
+        this.ModelDownloadProgressBar.Value = 100;
+        this.ShowModelDownloadMessage($"Downloaded {option.DisplayName} to {downloadedPath}.");
+    }
+
+    private async Task DownloadSelectedQualcommAihubWhisperModelAsync(CancellationToken cancellationToken)
+    {
+        if (this.ModelChoiceComboBox.SelectedItem is not QualcommAihubWhisperModelOption option)
+        {
+            return;
+        }
+
+        if (QualcommAihubWhisperModelCatalog.TryResolveInstalledPath(option, out var installedPath))
+        {
+            this.SetModelPathText(installedPath);
+            this.ShowModelDownloadMessage($"{option.DisplayName} is already installed and ready to use.");
+            return;
+        }
+
+        this.ShowModelDownloadMessage($"Downloading {option.DisplayName}...");
+        var progress = new Progress<QualcommAihubWhisperModelDownloadProgress>(downloadProgress =>
+        {
+            if (downloadProgress.Percentage is double percentage)
+            {
+                this.ModelDownloadProgressBar.IsIndeterminate = false;
+                this.ModelDownloadProgressBar.Value = percentage;
+            }
+
+            this.ShowModelDownloadMessage($"{option.DisplayName} - {downloadProgress.ProgressLabel}");
+        });
+
+        var downloadedPath = await QualcommAihubWhisperModelDownloader
             .DownloadAsync(option, progress, cancellationToken)
             .ConfigureAwait(true);
 
@@ -643,8 +711,10 @@ internal partial class SettingsWindow : Window
         switch (this.currentBackend)
         {
             case TranscriptionBackendKind.Moonshine:
-            case TranscriptionBackendKind.QualcommQnn:
                 this.BrowseMoonshineModelPath();
+                break;
+            case TranscriptionBackendKind.QualcommQnn:
+                this.BrowseQualcommAihubWhisperModelPath();
                 break;
             case TranscriptionBackendKind.Parakeet:
                 this.BrowseParakeetModelPath();
@@ -681,6 +751,32 @@ internal partial class SettingsWindow : Window
         }
 
         this.ShowModelDownloadMessage($"Using model folder: {dialog.SelectedPath}");
+        this.UpdateModelSelectionUi();
+    }
+
+    private void BrowseQualcommAihubWhisperModelPath()
+    {
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = "Select Qualcomm AI Hub Whisper precompiled_qnn_onnx model folder",
+            ShowNewFolderButton = false
+        };
+
+        if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+        {
+            return;
+        }
+
+        this.SetModelPathText(dialog.SelectedPath);
+        if (QualcommAihubWhisperModelCatalog.IsRawContextOnlyDirectory(dialog.SelectedPath))
+        {
+            this.ShowModelDownloadMessage("Selected folder contains raw QNN context binaries only. Download the app catalog model to install the required ONNX Runtime wrappers.");
+        }
+        else
+        {
+            this.ShowModelDownloadMessage($"Using model folder: {dialog.SelectedPath}");
+        }
+
         this.UpdateModelSelectionUi();
     }
 
@@ -774,8 +870,10 @@ internal partial class SettingsWindow : Window
         switch (this.currentBackend)
         {
             case TranscriptionBackendKind.Moonshine:
-            case TranscriptionBackendKind.QualcommQnn:
                 this.OnMoonshineModelChoiceChanged();
+                break;
+            case TranscriptionBackendKind.QualcommQnn:
+                this.OnQualcommAihubWhisperModelChoiceChanged();
                 break;
             case TranscriptionBackendKind.Parakeet:
                 this.OnParakeetModelChoiceChanged();
@@ -801,6 +899,29 @@ internal partial class SettingsWindow : Window
         var currentPathMatchesCatalog = WhisperModelCatalog.TryGetByPath(currentPath) is not null;
 
         if (WhisperModelCatalog.TryResolveInstalledPath(option, out var installedPath))
+        {
+            this.SetModelPathText(installedPath);
+        }
+        else if (string.IsNullOrWhiteSpace(currentPath) || currentPathMatchesCatalog)
+        {
+            this.SetModelPathText(string.Empty);
+        }
+
+        this.UpdateModelSelectionUi();
+    }
+
+    private void OnQualcommAihubWhisperModelChoiceChanged()
+    {
+        if (this.ModelChoiceComboBox.SelectedItem is not QualcommAihubWhisperModelOption option)
+        {
+            this.UpdateModelSelectionUi();
+            return;
+        }
+
+        var currentPath = this.ModelPathTextBox.Text.Trim();
+        var currentPathMatchesCatalog = QualcommAihubWhisperModelCatalog.TryGetByPath(currentPath) is not null;
+
+        if (QualcommAihubWhisperModelCatalog.TryResolveInstalledPath(option, out var installedPath))
         {
             this.SetModelPathText(installedPath);
         }
@@ -893,7 +1014,7 @@ internal partial class SettingsWindow : Window
         {
             TranscriptionBackendKind.Moonshine => MoonshineModelCatalog.TryGetByPath(currentPath),
             TranscriptionBackendKind.Parakeet => ParakeetModelCatalog.TryGetByPath(currentPath),
-            TranscriptionBackendKind.QualcommQnn => MoonshineModelCatalog.TryGetByPath(currentPath),
+            TranscriptionBackendKind.QualcommQnn => QualcommAihubWhisperModelCatalog.TryGetByPath(currentPath),
             TranscriptionBackendKind.WhisperNet => WhisperNetModelCatalog.TryGetByPath(currentPath),
             _ => WhisperModelCatalog.TryGetByPath(currentPath)
         };
@@ -1072,7 +1193,7 @@ internal partial class SettingsWindow : Window
         {
             TranscriptionBackendKind.Parakeet => $"Downloaded Parakeet models are stored in {ParakeetModelCatalog.GetManagedModelsDirectory()}.",
             TranscriptionBackendKind.Moonshine => $"Downloaded Moonshine models are stored in {MoonshineModelCatalog.GetManagedModelsDirectory()}.",
-            TranscriptionBackendKind.QualcommQnn => $"Qualcomm QNN uses the Moonshine model folder at {MoonshineModelCatalog.GetManagedModelsDirectory()}. Optional QNN-prepared artifacts may live in a qnn subfolder inside the selected Moonshine model directory.",
+            TranscriptionBackendKind.QualcommQnn => $"Downloaded Qualcomm AI Hub Whisper models are stored in {QualcommAihubWhisperModelCatalog.GetManagedModelsDirectory()}. The raw context-binary ZIP needs ONNX Runtime wrapper files, so the app installs the matching precompiled_qnn_onnx package.",
             TranscriptionBackendKind.WhisperNet => $"Downloaded Whisper.net models are stored in {WhisperNetModelCatalog.GetManagedModelsDirectory()}.",
             _ => $"Downloaded Whisper ONNX models are stored in {WhisperModelCatalog.GetManagedModelsDirectory()}."
         };
@@ -1360,12 +1481,12 @@ internal partial class SettingsWindow : Window
 
     private void UpdateQualcommQnnModelSelectionUi()
     {
-        if (this.ModelChoiceComboBox.SelectedItem is not MoonshineModelOption option)
+        if (this.ModelChoiceComboBox.SelectedItem is not QualcommAihubWhisperModelOption option)
         {
             this.ModelChoiceTitleText.Text = "Select a Qualcomm QNN model";
             this.ModelChoiceMetaText.Text = string.Empty;
             this.ModelChoiceDescriptionText.Text = string.Empty;
-            this.ModelChoiceStatusText.Text = "Pick a Moonshine model folder for the experimental Qualcomm QNN backend.";
+            this.ModelChoiceStatusText.Text = "Pick a Qualcomm AI Hub Whisper model to download or browse to an extracted precompiled_qnn_onnx folder.";
             this.RecommendedBadgeBorder.Visibility = Visibility.Collapsed;
             this.DownloadSelectedModelButton.IsEnabled = false;
             return;
@@ -1377,30 +1498,45 @@ internal partial class SettingsWindow : Window
         this.RecommendedBadgeBorder.Visibility = option.Recommended ? Visibility.Visible : Visibility.Collapsed;
 
         var currentPath = this.ModelPathTextBox.Text.Trim();
-        var hasConfiguredPath = MoonshineModelCatalog.TryResolveDirectory(currentPath, out var resolvedConfiguredPath);
-        var isInstalled = MoonshineModelCatalog.TryResolveInstalledPath(option, out var installedPath);
+        var hasConfiguredPath = QualcommAihubWhisperModelCatalog.TryResolveDirectory(currentPath, out var resolvedConfiguredPath);
+        var hasRawContextOnlyPath = QualcommAihubWhisperModelCatalog.IsRawContextOnlyDirectory(currentPath);
+        var isInstalled = QualcommAihubWhisperModelCatalog.TryResolveInstalledPath(option, out var installedPath);
 
         if (hasConfiguredPath)
         {
-            this.ModelChoiceStatusText.Text = PlatformSupport.SupportsQualcommQnnHtp
-                ? $"Selected Moonshine model ready for Qualcomm QNN experiments: {resolvedConfiguredPath}"
-                : $"Selected Moonshine model ready, but QNN HTP is unavailable on this machine. PrimeDictate will use CPU ORT if you keep this backend selected.";
+            var configuredOption = QualcommAihubWhisperModelCatalog.TryGetByPath(resolvedConfiguredPath);
+            if (!PlatformSupport.SupportsQualcommQnnHtp)
+            {
+                this.ModelChoiceStatusText.Text = $"Selected Qualcomm AI Hub Whisper model is installed, but QNN HTP is unavailable in this process: {resolvedConfiguredPath}";
+            }
+            else if (configuredOption is not null && configuredOption.Id == option.Id)
+            {
+                this.ModelChoiceStatusText.Text = $"Selected Qualcomm AI Hub Whisper model ready for QNN HTP: {resolvedConfiguredPath}";
+            }
+            else
+            {
+                this.ModelChoiceStatusText.Text = $"Using a custom Qualcomm AI Hub Whisper precompiled_qnn_onnx folder: {resolvedConfiguredPath}";
+            }
+        }
+        else if (hasRawContextOnlyPath)
+        {
+            this.ModelChoiceStatusText.Text = "The selected folder contains only raw qnn_context_binary files (encoder.bin and decoder.bin). PrimeDictate needs encoder.onnx and decoder.onnx EPContext wrappers; click Download model to install the runnable precompiled_qnn_onnx package.";
         }
         else if (!string.IsNullOrWhiteSpace(currentPath))
         {
-            this.ModelChoiceStatusText.Text = "The model folder in the textbox is missing required Moonshine files.";
+            this.ModelChoiceStatusText.Text = "The model folder in the textbox is missing required Qualcomm AI Hub Whisper files.";
         }
         else if (isInstalled)
         {
             this.ModelChoiceStatusText.Text = PlatformSupport.SupportsQualcommQnnHtp
-                ? $"Installed on this PC: {installedPath}. Strict validation will require all Moonshine sessions to load on QNN HTP with CPU fallback disabled."
-                : $"Installed on this PC: {installedPath}. QNN HTP is unavailable on this machine, so this backend will only use CPU ORT here.";
+                ? $"Installed on this PC: {installedPath}. This package is ready for QNN HTP transcription."
+                : $"Installed on this PC: {installedPath}. QNN HTP requires a native Windows ARM64 process with QNN runtime assets present.";
         }
         else
         {
             this.ModelChoiceStatusText.Text = PlatformSupport.SupportsQualcommQnnHtp
-                ? $"Not downloaded yet. Download {option.DisplayName} or browse to an extracted Moonshine folder. Optional QNN-prepared artifacts can be placed in a qnn subfolder later."
-                : $"Not downloaded yet. Download {option.DisplayName} for CPU ORT testing, but note that Qualcomm QNN HTP requires a native Windows ARM64 build with QNN runtime assets present.";
+                ? $"Not downloaded yet. Download {option.DisplayName} or browse to an extracted precompiled_qnn_onnx folder."
+                : $"Not downloaded yet. Download {option.DisplayName} to stage the model, but Qualcomm QNN HTP requires a native Windows ARM64 build with QNN runtime assets present.";
         }
 
         this.DownloadSelectedModelButton.Content = isInstalled ? "Already installed" : "Download model";
@@ -1443,11 +1579,11 @@ internal partial class SettingsWindow : Window
                 NumberStyles.Integer,
                 CultureInfo.InvariantCulture,
                 out var autoCommitSeconds) ||
-            autoCommitSeconds is < 1 or > 30)
+            autoCommitSeconds is < 0 or > 30)
         {
             System.Windows.MessageBox.Show(
                 this,
-                "Auto-commit silence must be a whole number from 1 to 30 seconds.",
+                "Auto-commit silence must be a whole number from 0 to 30 seconds. Use 0 to commit only with the start / stop shortcut.",
                 "Invalid auto-commit delay",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -1740,7 +1876,7 @@ internal partial class SettingsWindow : Window
         {
             TranscriptionBackendKind.Moonshine => (this.ModelChoiceComboBox.SelectedItem as MoonshineModelOption)?.Id,
             TranscriptionBackendKind.Parakeet => (this.ModelChoiceComboBox.SelectedItem as ParakeetModelOption)?.Id,
-            TranscriptionBackendKind.QualcommQnn => (this.ModelChoiceComboBox.SelectedItem as MoonshineModelOption)?.Id,
+            TranscriptionBackendKind.QualcommQnn => (this.ModelChoiceComboBox.SelectedItem as QualcommAihubWhisperModelOption)?.Id,
             TranscriptionBackendKind.WhisperNet => (this.ModelChoiceComboBox.SelectedItem as WhisperNetModelOption)?.Id,
             _ => (this.ModelChoiceComboBox.SelectedItem as WhisperModelOption)?.Id
         };
@@ -1952,7 +2088,7 @@ internal partial class SettingsWindow : Window
         {
             TranscriptionBackendKind.Moonshine => this.TryResolveMoonshineSelectionForSave(configuredPath, out resolvedModelPath, out selectedModelId),
             TranscriptionBackendKind.Parakeet => this.TryResolveParakeetSelectionForSave(configuredPath, out resolvedModelPath, out selectedModelId),
-            TranscriptionBackendKind.QualcommQnn => this.TryResolveMoonshineSelectionForSave(configuredPath, out resolvedModelPath, out selectedModelId),
+            TranscriptionBackendKind.QualcommQnn => this.TryResolveQualcommAihubWhisperSelectionForSave(configuredPath, out resolvedModelPath, out selectedModelId),
             TranscriptionBackendKind.WhisperNet => this.TryResolveWhisperNetSelectionForSave(configuredPath, out resolvedModelPath, out selectedModelId),
             _ => this.TryResolveWhisperSelectionForSave(configuredPath, out resolvedModelPath, out selectedModelId)
         };
@@ -2093,6 +2229,61 @@ internal partial class SettingsWindow : Window
         System.Windows.MessageBox.Show(
             this,
             "Choose a Moonshine model to download or browse to an existing model folder before saving.",
+            "Model required",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+        return false;
+    }
+
+    private bool TryResolveQualcommAihubWhisperSelectionForSave(
+        string configuredPath,
+        out string resolvedModelPath,
+        out string? selectedModelId)
+    {
+        resolvedModelPath = string.Empty;
+        selectedModelId = (this.ModelChoiceComboBox.SelectedItem as QualcommAihubWhisperModelOption)?.Id;
+
+        if (QualcommAihubWhisperModelCatalog.TryResolveDirectory(configuredPath, out var explicitDirectory))
+        {
+            resolvedModelPath = explicitDirectory;
+            selectedModelId = QualcommAihubWhisperModelCatalog.TryGetByPath(explicitDirectory)?.Id ?? selectedModelId;
+            return true;
+        }
+
+        if (QualcommAihubWhisperModelCatalog.IsRawContextOnlyDirectory(configuredPath))
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                "That folder contains the raw qnn_context_binary package only. PrimeDictate needs the matching precompiled_qnn_onnx package because ONNX Runtime loads Qualcomm context binaries through encoder.onnx and decoder.onnx wrapper files. Use Download model to install the runnable package.",
+                "Raw context package selected",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                "The selected model folder is incomplete. PrimeDictate needs encoder.onnx, decoder.onnx, encoder_qairt_context.bin, decoder_qairt_context.bin, metadata.json, and multilingual.tiktoken.",
+                "Model folder not found",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return false;
+        }
+
+        if (this.ModelChoiceComboBox.SelectedItem is QualcommAihubWhisperModelOption option &&
+            QualcommAihubWhisperModelCatalog.TryResolveInstalledPath(option, out var installedPath))
+        {
+            resolvedModelPath = installedPath;
+            selectedModelId = option.Id;
+            this.SetModelPathText(installedPath);
+            return true;
+        }
+
+        System.Windows.MessageBox.Show(
+            this,
+            "Choose a Qualcomm AI Hub Whisper model to download or browse to an extracted precompiled_qnn_onnx model folder before saving.",
             "Model required",
             MessageBoxButton.OK,
             MessageBoxImage.Warning);

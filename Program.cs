@@ -119,13 +119,16 @@ internal sealed class DictationController : IAsyncDisposable
     private static readonly TimeSpan LiveTranscribeInterval = TimeSpan.FromMilliseconds(1_500);
     private static readonly TimeSpan LiveMinAudio = TimeSpan.FromSeconds(0.55);
     private static readonly TimeSpan LivePreviewMaxAudio = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan MinAutoCommitRecordingDuration = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan VoiceShellTypeTargetWait = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan VoiceShellTypePollInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan SilenceProbeInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan RecentSpeechWindow = TimeSpan.FromMilliseconds(450);
     private const double MinSpeechRmsThreshold = 0.0018;
     private const double MaxSpeechRmsThreshold = 0.02;
-    private const double NoiseFloorSmoothing = 0.08;
+    private const double NoiseFloorRiseSmoothing = 0.02;
+    private const double NoiseFloorFallSmoothing = 0.18;
+    private const int MinSpeechLevelEventsBeforeAutoCommit = 3;
 
     private readonly SemaphoreSlim toggleGate = new(initialCount: 1, maxCount: 1);
     private readonly DefaultMicrophoneRecorder recorder = new();
@@ -156,6 +159,7 @@ internal sealed class DictationController : IAsyncDisposable
     private OllamaMode ollamaMode = OllamaMode.Default;
     private List<TranscriptReplacementRule> transcriptReplacements = new();
     private long lastSpeechTicksUtc;
+    private int speechLevelEventsThisSession;
     private double adaptiveNoiseFloorRms = MinSpeechRmsThreshold;
     private double maxObservedRmsThisSession;
 
@@ -296,6 +300,7 @@ internal sealed class DictationController : IAsyncDisposable
                 Interlocked.Exchange(ref this.voiceStopRequested, 0);
                 Interlocked.Exchange(ref this.voiceHistoryRequested, 0);
                 Interlocked.Exchange(ref this.lastSpeechTicksUtc, 0);
+                Interlocked.Exchange(ref this.speechLevelEventsThisSession, 0);
                 this.adaptiveNoiseFloorRms = MinSpeechRmsThreshold;
                 this.maxObservedRmsThisSession = 0;
                 this.ThreadStarted?.Invoke(threadId);
@@ -303,8 +308,11 @@ internal sealed class DictationController : IAsyncDisposable
                 this.livePreviewCts = new CancellationTokenSource();
                 var liveToken = this.livePreviewCts.Token;
                 this.livePreviewTask = Task.Run(() => this.LivePreviewLoopAsync(liveToken), CancellationToken.None);
+                var autoCommitLabel = silenceDelay > TimeSpan.Zero
+                    ? $"auto-commit after {silenceDelay.TotalSeconds:N0}s silence"
+                    : "manual hotkey stop only";
                 AppLog.Info(
-                    $"Recording started (live preview, auto-commit after {silenceDelay.TotalSeconds:N0}s silence, mic mode: {this.ActiveMicAccessModeLabel}).",
+                    $"Recording started (live preview, {autoCommitLabel}, mic mode: {this.ActiveMicAccessModeLabel}).",
                     threadId);
                 this.RecordingStateChanged?.Invoke(true);
                 return;
@@ -419,6 +427,12 @@ internal sealed class DictationController : IAsyncDisposable
             lock (this.configSync)
             {
                 silenceDelay = this.autoCommitSilenceDelay;
+            }
+
+            if (silenceDelay <= TimeSpan.Zero ||
+                !this.IsAutoCommitArmed(recordingStartedUtc, nowUtc))
+            {
+                continue;
             }
 
             if (lastSpeechUtc is DateTime speechUtc && nowUtc - speechUtc >= silenceDelay)
@@ -674,6 +688,14 @@ internal sealed class DictationController : IAsyncDisposable
         if (audio.IsEmpty)
         {
             AppLog.Info("No audio captured.", this.activeThreadId);
+            return;
+        }
+
+        if (!this.HasRecordedSpeechEvidence(audio))
+        {
+            AppLog.Info(
+                $"No speech detected; skipped final transcription. Peak mic RMS this session: {this.maxObservedRmsThisSession:0.0000}.",
+                this.activeThreadId);
             return;
         }
 
@@ -1106,23 +1128,92 @@ internal sealed class DictationController : IAsyncDisposable
 
     private void OnRecorderAudioLevelUpdated(double rms)
     {
+        rms = Math.Max(0, rms);
         if (rms > this.maxObservedRmsThisSession)
         {
             this.maxObservedRmsThisSession = rms;
         }
 
-        // Track a soft ambient noise floor and derive a dynamic speech threshold.
-        this.adaptiveNoiseFloorRms =
-            (this.adaptiveNoiseFloorRms * (1 - NoiseFloorSmoothing)) +
-            (Math.Max(0, rms) * NoiseFloorSmoothing);
+        // Derive the speech threshold before updating the floor so speech does not train
+        // the ambient estimate upward and cause early silence auto-commits.
         var dynamicThreshold = Math.Clamp(this.adaptiveNoiseFloorRms * 3.5, MinSpeechRmsThreshold, MaxSpeechRmsThreshold);
 
         if (rms >= dynamicThreshold)
         {
             Interlocked.Exchange(ref this.lastSpeechTicksUtc, DateTime.UtcNow.Ticks);
+            Interlocked.Increment(ref this.speechLevelEventsThisSession);
+        }
+        else
+        {
+            var smoothing = rms < this.adaptiveNoiseFloorRms
+                ? NoiseFloorFallSmoothing
+                : NoiseFloorRiseSmoothing;
+            this.adaptiveNoiseFloorRms =
+                (this.adaptiveNoiseFloorRms * (1 - smoothing)) +
+                (rms * smoothing);
         }
 
         this.AudioLevelUpdated?.Invoke(rms);
+    }
+
+    private bool IsAutoCommitArmed(DateTime recordingStartedUtc, DateTime nowUtc)
+    {
+        if (nowUtc - recordingStartedUtc < MinAutoCommitRecordingDuration)
+        {
+            return false;
+        }
+
+        return Interlocked.CompareExchange(ref this.speechLevelEventsThisSession, 0, 0) >=
+            MinSpeechLevelEventsBeforeAutoCommit;
+    }
+
+    private bool HasRecordedSpeechEvidence(PcmAudioBuffer audio) =>
+        Interlocked.CompareExchange(ref this.speechLevelEventsThisSession, 0, 0) >=
+            MinSpeechLevelEventsBeforeAutoCommit ||
+        ContainsLikelySpeech(audio);
+
+    private static bool ContainsLikelySpeech(PcmAudioBuffer audio)
+    {
+        var sampleCount = TranscriptionAudio.GetPcm16MonoSampleCount(audio, "Recorded audio");
+        if (sampleCount == 0)
+        {
+            return false;
+        }
+
+        const int frameSampleCount = 1_600;
+        const int requiredSpeechFrames = 2;
+
+        var samples = MemoryMarshal.Cast<byte, short>(audio.Pcm16KhzMono.AsSpan(0, sampleCount * 2));
+        var speechFrames = 0;
+        for (var frameStart = 0; frameStart < samples.Length; frameStart += frameSampleCount)
+        {
+            var frame = samples.Slice(frameStart, Math.Min(frameSampleCount, samples.Length - frameStart));
+            if (frame.Length == 0)
+            {
+                continue;
+            }
+
+            double sumSquares = 0;
+            for (var i = 0; i < frame.Length; i++)
+            {
+                var normalized = frame[i] / 32768.0;
+                sumSquares += normalized * normalized;
+            }
+
+            var rms = Math.Sqrt(sumSquares / frame.Length);
+            if (rms < MinSpeechRmsThreshold)
+            {
+                continue;
+            }
+
+            speechFrames++;
+            if (speechFrames >= requiredSpeechFrames)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private DateTime? GetLastSpeechUtc()
@@ -1135,6 +1226,11 @@ internal sealed class DictationController : IAsyncDisposable
 
     private static TimeSpan NormalizeSilenceDelay(TimeSpan delay)
     {
+        if (delay <= TimeSpan.Zero)
+        {
+            return TimeSpan.Zero;
+        }
+
         if (delay < TimeSpan.FromSeconds(1))
         {
             return TimeSpan.FromSeconds(1);

@@ -55,7 +55,7 @@ internal static class TranscriptionRuntimeSupport
             choices.Add(new TranscriptionComputeChoice(
                 TranscriptionComputeInterface.Npu,
                 "NPU (Qualcomm QNN HTP)",
-                "Runs the Moonshine stages through ONNX Runtime QNN HTP with CPU fallback disabled for QNN sessions."));
+                "Runs Qualcomm AI Hub Whisper precompiled ONNX wrappers through ONNX Runtime QNN HTP with CPU fallback disabled."));
         }
 
         return choices;
@@ -103,7 +103,19 @@ internal static class TranscriptionRuntimeSupport
 
             if (settings.TranscriptionBackend == TranscriptionBackendKind.QualcommQnn)
             {
-                settings.TranscriptionBackend = TranscriptionBackendKind.Moonshine;
+                if (QualcommAihubWhisperModelCatalog.TryGetById(settings.SelectedModelId, out _) ||
+                    QualcommAihubWhisperModelCatalog.TryResolveDirectory(settings.ModelPath, out _) ||
+                    QualcommAihubWhisperModelCatalog.IsRawContextOnlyDirectory(settings.ModelPath))
+                {
+                    settings.TranscriptionBackend = TranscriptionBackendKind.Whisper;
+                    settings.SelectedModelId = null;
+                    settings.ModelPath = null;
+                }
+                else
+                {
+                    settings.TranscriptionBackend = TranscriptionBackendKind.Moonshine;
+                }
+
                 settings.TranscriptionComputeInterface = TranscriptionComputeInterface.Cpu;
                 changed = true;
             }
@@ -181,9 +193,9 @@ internal static class TranscriptionRuntimeSupport
 
         if (PlatformSupport.SupportsQualcommQnnHtp)
         {
-            foreach (var option in MoonshineModelCatalog.Options)
+            foreach (var option in QualcommAihubWhisperModelCatalog.Options)
             {
-                if (MoonshineModelCatalog.TryResolveInstalledPath(option, out var installedPath))
+                if (QualcommAihubWhisperModelCatalog.TryResolveInstalledPath(option, out var installedPath))
                 {
                     selection = new TranscriptionConfigurationSelection(
                         TranscriptionBackendKind.QualcommQnn,

@@ -128,7 +128,7 @@
                                          Width="48"
                                          Margin="8,0,8,0"
                                          VerticalContentAlignment="Center" />
-                                <TextBlock VerticalAlignment="Center" Text="seconds of silence" />
+                                <TextBlock VerticalAlignment="Center" Text="seconds of silence (0 = hotkey only)" />
                             </StackPanel>
                             <CheckBox Name="SendEnterAfterCommitCheckBox"
                                       Margin="0,10,0,0"

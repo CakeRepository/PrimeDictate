@@ -138,6 +138,20 @@ public partial class App : System.Windows.Application
 
         try
         {
+            if (string.Equals(args[0], "--qnn-aihub-whisper-transcribe", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 3)
+                {
+                    throw new ArgumentException(
+                        "Usage: --qnn-aihub-whisper-transcribe <model-directory> <pcm16khz-mono-wav> [output-file]");
+                }
+
+                WriteValidationResult(
+                    QualcommQnnWhisperValidationHarness.RunAihubWavTranscription(args[1], args[2]),
+                    args.Length >= 4 ? args[3] : null);
+                return true;
+            }
+
             if (string.Equals(args[0], "--qnn-whisper-smoke", StringComparison.OrdinalIgnoreCase))
             {
                 if (args.Length < 3)
@@ -805,7 +819,7 @@ public partial class App : System.Windows.Application
 
     private string GetActiveBackendLabel() => this.settings?.TranscriptionBackend switch
     {
-        TranscriptionBackendKind.QualcommQnn => "Qualcomm QNN (Experimental)",
+        TranscriptionBackendKind.QualcommQnn => "Qualcomm AI Hub Whisper QNN",
         TranscriptionBackendKind.Moonshine => "Moonshine ONNX",
         TranscriptionBackendKind.Parakeet => "Parakeet ONNX",
         TranscriptionBackendKind.WhisperNet => "Whisper.net (GGML)",
@@ -821,7 +835,7 @@ public partial class App : System.Windows.Application
 
         return this.settings.TranscriptionBackend switch
         {
-            TranscriptionBackendKind.QualcommQnn => GetMoonshineModelLabel(this.settings),
+            TranscriptionBackendKind.QualcommQnn => GetQualcommAihubWhisperModelLabel(this.settings),
             TranscriptionBackendKind.Moonshine => GetMoonshineModelLabel(this.settings),
             TranscriptionBackendKind.Parakeet => GetParakeetModelLabel(this.settings),
             TranscriptionBackendKind.WhisperNet => GetWhisperNetModelLabel(this.settings),
@@ -884,6 +898,27 @@ public partial class App : System.Windows.Application
         if (string.IsNullOrWhiteSpace(settings.ModelPath))
         {
             return "Default";
+        }
+
+        return Path.GetFileName(settings.ModelPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+    }
+
+    private static string GetQualcommAihubWhisperModelLabel(AppSettings settings)
+    {
+        if (QualcommAihubWhisperModelCatalog.TryGetById(settings.SelectedModelId, out var option))
+        {
+            return option.DisplayName;
+        }
+
+        var optionFromPath = QualcommAihubWhisperModelCatalog.TryGetByPath(settings.ModelPath);
+        if (optionFromPath is not null)
+        {
+            return optionFromPath.DisplayName;
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.ModelPath))
+        {
+            return "Auto";
         }
 
         return Path.GetFileName(settings.ModelPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
