@@ -1,3 +1,11 @@
+# PrimeDictate 4.4.3
+
+## Highlights
+
+- Fixed update handoff so major-upgrade MSIs install normally instead of using repair/reinstall flags that can leave self-contained runtime files unregistered.
+- Added installer build validation for self-contained .NET runtime files in the publish output and MSI payload.
+- Added a configurable start / stop dictation voice phrase. The default is `thank you`, and the phrase is removed before final text injection.
+
 # PrimeDictate 4.4.0
 
 ## Highlights

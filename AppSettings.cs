@@ -8,6 +8,9 @@ namespace PrimeDictate;
 internal sealed class AppSettings
 {
     internal const int DefaultBaselineTypingSpeedWpm = 40;
+    internal const string DefaultVoiceDictationPhrase = "thank you";
+    internal const string DefaultVoiceStopPhrase = "potato farmer";
+    internal const string DefaultVoiceHistoryPhrase = "show me the money";
 
     public bool FirstRunCompleted { get; set; }
 
@@ -19,9 +22,11 @@ internal sealed class AppSettings
 
     public bool EnableVoiceCommands { get; set; } = true;
 
-    public string VoiceStopPhrase { get; set; } = "potato farmer";
+    public string VoiceDictationPhrase { get; set; } = DefaultVoiceDictationPhrase;
 
-    public string VoiceHistoryPhrase { get; set; } = "show me the money";
+    public string VoiceStopPhrase { get; set; } = DefaultVoiceStopPhrase;
+
+    public string VoiceHistoryPhrase { get; set; } = DefaultVoiceHistoryPhrase;
 
     public List<VoiceShellCommand> VoiceShellCommands { get; set; } = new();
 
@@ -86,8 +91,9 @@ internal sealed class AppSettings
         StopHotkey = HotkeyGesture.DefaultStop,
         HistoryHotkey = HotkeyGesture.DefaultHistory,
         EnableVoiceCommands = true,
-        VoiceStopPhrase = "potato farmer",
-        VoiceHistoryPhrase = "show me the money",
+        VoiceDictationPhrase = DefaultVoiceDictationPhrase,
+        VoiceStopPhrase = DefaultVoiceStopPhrase,
+        VoiceHistoryPhrase = DefaultVoiceHistoryPhrase,
         VoiceShellCommands = new List<VoiceShellCommand>(),
         TrayClickBehavior = TrayClickBehavior.DoubleClickOpensSettings,
         LaunchAtLoginScope = LaunchAtLoginScope.NotConfigured,

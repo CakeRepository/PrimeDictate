@@ -250,7 +250,7 @@ internal sealed class GitHubUpdateService : IDisposable
         }
 
         $quotedInstallerPath = '"' + $InstallerPath.Replace('"', '\"') + '"'
-        $installerArguments = "/i $quotedInstallerPath REINSTALL=ALL REINSTALLMODE=vomus $LaunchAtLoginProperty"
+        $installerArguments = "/i $quotedInstallerPath $LaunchAtLoginProperty"
         Start-Process -FilePath 'msiexec.exe' -ArgumentList $installerArguments -Verb RunAs
 
         try {

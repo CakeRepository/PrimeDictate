@@ -4,6 +4,7 @@ namespace PrimeDictate;
 
 internal readonly record struct VoiceCommandMatch(
     string CleanedText,
+    bool CommitRequested,
     bool StopRequested,
     bool HistoryRequested,
     VoiceShellCommandInvocation? ShellCommandInvocation);
@@ -14,6 +15,7 @@ internal sealed record VoiceShellCommandInvocation(
 
 internal sealed record VoiceCommandOptions(
     bool Enabled,
+    string DictationPhrase,
     string StopPhrase,
     string HistoryPhrase,
     IReadOnlyList<VoiceShellCommand> ShellCommands);
@@ -29,16 +31,19 @@ internal static class VoiceCommandMatcher
         {
             return new VoiceCommandMatch(
                 transcript,
+                CommitRequested: false,
                 StopRequested: false,
                 HistoryRequested: false,
                 ShellCommandInvocation: null);
         }
 
         var cleaned = transcript;
+        var commitRequested = TryRemovePhrase(cleaned, options.DictationPhrase, out cleaned);
         var stopRequested = TryRemovePhrase(cleaned, options.StopPhrase, out cleaned);
         var historyRequested = TryRemovePhrase(cleaned, options.HistoryPhrase, out cleaned);
         VoiceShellCommandInvocation? shellCommandInvocation = null;
         if (includeShellCommands &&
+            !commitRequested &&
             !stopRequested &&
             TryFindShellCommand(cleaned, options.ShellCommands, out var matchedInvocation, out var shellCleaned))
         {
@@ -48,6 +53,7 @@ internal static class VoiceCommandMatcher
 
         return new VoiceCommandMatch(
             CollapseWhitespace(cleaned).Trim(),
+            commitRequested,
             stopRequested,
             historyRequested,
             shellCommandInvocation);

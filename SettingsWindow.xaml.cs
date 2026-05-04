@@ -100,6 +100,7 @@ internal partial class SettingsWindow : Window
         this.CheckForUpdatesAutomaticallyCheckBox.IsChecked = settings.CheckForUpdatesAutomatically;
         this.OverlayModeComboBox.SelectedIndex = settings.OverlayMode == OverlayMode.FullPanel ? 1 : 0;
         this.EnableVoiceCommandsCheckBox.IsChecked = settings.EnableVoiceCommands;
+        this.VoiceDictationPhraseTextBox.Text = settings.VoiceDictationPhrase;
         this.VoiceStopPhraseTextBox.Text = settings.VoiceStopPhrase;
         this.VoiceHistoryPhraseTextBox.Text = settings.VoiceHistoryPhrase;
         foreach (var command in settings.VoiceShellCommands ?? [])
@@ -1630,9 +1631,20 @@ internal partial class SettingsWindow : Window
         var selectedLaunchAtLoginScope = GetSelectedLaunchAtLoginScope();
         var selectedOverlayMode = ((ComboBoxItem)this.OverlayModeComboBox.SelectedItem).Tag?.ToString();
         var enableVoiceCommands = this.EnableVoiceCommandsCheckBox.IsChecked == true;
+        var voiceDictationPhrase = this.VoiceDictationPhraseTextBox.Text.Trim();
         var voiceStopPhrase = this.VoiceStopPhraseTextBox.Text.Trim();
         var voiceHistoryPhrase = this.VoiceHistoryPhraseTextBox.Text.Trim();
+        var effectiveVoiceDictationPhrase = string.IsNullOrWhiteSpace(voiceDictationPhrase)
+            ? AppSettings.DefaultVoiceDictationPhrase
+            : voiceDictationPhrase;
+        var effectiveVoiceStopPhrase = string.IsNullOrWhiteSpace(voiceStopPhrase)
+            ? AppSettings.DefaultVoiceStopPhrase
+            : voiceStopPhrase;
+        var effectiveVoiceHistoryPhrase = string.IsNullOrWhiteSpace(voiceHistoryPhrase)
+            ? AppSettings.DefaultVoiceHistoryPhrase
+            : voiceHistoryPhrase;
         if (enableVoiceCommands &&
+            string.IsNullOrWhiteSpace(voiceDictationPhrase) &&
             string.IsNullOrWhiteSpace(voiceStopPhrase) &&
             string.IsNullOrWhiteSpace(voiceHistoryPhrase))
         {
@@ -1645,13 +1657,15 @@ internal partial class SettingsWindow : Window
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(voiceStopPhrase) &&
-            !string.IsNullOrWhiteSpace(voiceHistoryPhrase) &&
-            string.Equals(voiceStopPhrase, voiceHistoryPhrase, StringComparison.OrdinalIgnoreCase))
+        if (!TryValidateReservedVoicePhrases(
+                effectiveVoiceDictationPhrase,
+                effectiveVoiceStopPhrase,
+                effectiveVoiceHistoryPhrase,
+                out var duplicateVoicePhraseError))
         {
             System.Windows.MessageBox.Show(
                 this,
-                "Use different phrases for Stop and History voice commands.",
+                duplicateVoicePhraseError,
                 "Duplicate voice commands",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -1659,8 +1673,9 @@ internal partial class SettingsWindow : Window
         }
 
         if (!this.TryBuildVoiceShellCommands(
-                voiceStopPhrase,
-                voiceHistoryPhrase,
+                effectiveVoiceDictationPhrase,
+                effectiveVoiceStopPhrase,
+                effectiveVoiceHistoryPhrase,
                 out var voiceShellCommandsForSave))
         {
             return false;
@@ -1679,8 +1694,9 @@ internal partial class SettingsWindow : Window
             StopHotkey = this.currentStopHotkey,
             HistoryHotkey = this.currentHistoryHotkey,
             EnableVoiceCommands = enableVoiceCommands,
-            VoiceStopPhrase = string.IsNullOrWhiteSpace(voiceStopPhrase) ? "potato farmer" : voiceStopPhrase,
-            VoiceHistoryPhrase = string.IsNullOrWhiteSpace(voiceHistoryPhrase) ? "show me the money" : voiceHistoryPhrase,
+            VoiceDictationPhrase = effectiveVoiceDictationPhrase,
+            VoiceStopPhrase = effectiveVoiceStopPhrase,
+            VoiceHistoryPhrase = effectiveVoiceHistoryPhrase,
             VoiceShellCommands = voiceShellCommandsForSave,
             TrayClickBehavior = selectedBehavior == "Single"
                 ? TrayClickBehavior.SingleClickOpensSettings
@@ -1717,13 +1733,57 @@ internal partial class SettingsWindow : Window
         return true;
     }
 
+    private static bool TryValidateReservedVoicePhrases(
+        string voiceDictationPhrase,
+        string voiceStopPhrase,
+        string voiceHistoryPhrase,
+        out string error)
+    {
+        var phraseOwners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!TryAddReservedVoicePhrase(phraseOwners, voiceDictationPhrase, "Start / stop", out error) ||
+            !TryAddReservedVoicePhrase(phraseOwners, voiceStopPhrase, "Emergency stop", out error) ||
+            !TryAddReservedVoicePhrase(phraseOwners, voiceHistoryPhrase, "Open history", out error))
+        {
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryAddReservedVoicePhrase(
+        IDictionary<string, string> phraseOwners,
+        string phrase,
+        string owner,
+        out string error)
+    {
+        var phraseKey = NormalizeVoicePhraseKey(phrase);
+        if (phraseKey.Length == 0)
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        if (phraseOwners.TryGetValue(phraseKey, out var existingOwner))
+        {
+            error = $"Use different phrases for {owner} and {existingOwner} voice commands.";
+            return false;
+        }
+
+        phraseOwners.Add(phraseKey, owner);
+        error = string.Empty;
+        return true;
+    }
+
     private bool TryBuildVoiceShellCommands(
+        string voiceDictationPhrase,
         string voiceStopPhrase,
         string voiceHistoryPhrase,
         out List<VoiceShellCommand> commands)
     {
         commands = new List<VoiceShellCommand>();
         var phraseOwners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        AddReservedVoicePhrase(phraseOwners, voiceDictationPhrase, "Start / stop phrase");
         AddReservedVoicePhrase(phraseOwners, voiceStopPhrase, "Stop phrase");
         AddReservedVoicePhrase(phraseOwners, voiceHistoryPhrase, "History phrase");
 

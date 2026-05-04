@@ -17,7 +17,7 @@
 ## Features
 
 - **Global hotkeys**: Configurable global shortcuts for start/stop toggle (default `Ctrl+Shift+Space`), emergency stop/discard (default `Ctrl+Shift+Enter`), and transcript history (default `Ctrl+Shift+H`).
-- **Voice commands**: Optional phrases can be detected while dictating. Defaults are `potato farmer` to discard the active capture and `show me the money` to open history; command phrases are removed before final text injection. Custom computer commands can run local command prompt actions and either stop the commit or continue with the remaining dictated text.
+- **Voice commands**: Optional phrases can be detected while dictating. Defaults are `thank you` to commit the active capture, `potato farmer` to discard it, and `show me the money` to open history; command phrases are removed before final text injection. Custom computer commands can run local command prompt actions and either stop the commit or continue with the remaining dictated text.
 - **Tray workspace UI**: Open **Workspace** from the tray icon to browse per-session dictation threads and global runtime logs in a clearer, column-based dashboard layout.
 - **AI Prompt Modes (Ollama Integration)**: Automatically rewrite and format your transcripts using a local Ollama instance. Includes dynamic prompt modes (like Bug, Update, and Blog) and injects the active application's context into the LLM for application-aware output.
 - **Log signal over noise**: Repeated adjacent log entries are collapsed (for example `(... x12)`) and history is capped to keep memory usage predictable.
@@ -245,7 +245,7 @@ For moderation retries, maintainers can repack and push locally with the same ve
 - MSI install x64 (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z-x64.msi /qn /norestart`
 - MSI install ARM64 (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z-arm64.msi /qn /norestart`
 - MSI install without launch at login: `msiexec /i PrimeDictate-Setup-vX.Y.Z-<arch>.msi LAUNCHATLOGIN=0 /qn /norestart`
-- MSI upgrade (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z-<arch>.msi REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart`
+- MSI upgrade (silent): `msiexec /i PrimeDictate-Setup-vX.Y.Z-<arch>.msi /qn /norestart`
 - MSI uninstall (silent): `msiexec /x PrimeDictate-Setup-vX.Y.Z-<arch>.msi /qn /norestart`
 - Chocolatey install (silent by default): `choco install primedictate -y`
 - Chocolatey install without launch at login: `choco install primedictate -y --params "'/NoLaunchAtLogin'"`
@@ -259,7 +259,7 @@ PrimeDictate now runs as a **WPF tray app** (no console window in normal use):
 - **Tray shell**: Notification-area icon with **Open Workspace**, **Settings**, and **Exit** menu items.
 - **Tray status colors**: **Ready = Blue**, **Recording = Red**, **Processing = Green**, **Error = Yellow**. Tooltip text follows app state (`Ready`, `Listening`, `Processing transcript`, `Error`).
 - **First launch**: If `%LocalAppData%\PrimeDictate\settings.json` is missing or incomplete, a guided setup window appears with **Welcome**, **Model**, **Commands**, **Replacements**, and **Impact** tabs.
-- **Configurable commands**: Global toggle, emergency stop, and history shortcuts are loaded from saved settings and applied to `GlobalHotkeyListener` at startup. Voice command phrases and command prompt actions, including chained `type ...` text and Stop/Continue behavior, are configurable from the Commands tab.
+- **Configurable commands**: Global toggle, emergency stop, and history shortcuts are loaded from saved settings and applied to `GlobalHotkeyListener` at startup. Voice phrases for commit, emergency stop, history, and command prompt actions, including chained `type ...` text and Stop/Continue behavior, are configurable from the Commands tab.
 - **Backend picker + download**: Setup and Settings include curated Whisper, Parakeet, Moonshine, Whisper.net, and Qualcomm AI Hub model options, local download progress, and a manual browse fallback.
 - **Experimental ARM64 QNN path**: Native `win-arm64` builds can expose an experimental Qualcomm AI Hub Whisper backend that uses ONNX Runtime QNN EPContext wrappers with explicit QNN diagnostics.
 - **Runtime model switching**: Changing the selected backend or model causes the next transcription session to reload the correct engine automatically.

@@ -103,6 +103,7 @@ public partial class App : System.Windows.Application
             this.settings.OllamaModel,
             this.settings.OllamaMode,
             this.settings.EnableVoiceCommands,
+            this.settings.VoiceDictationPhrase,
             this.settings.VoiceStopPhrase,
             this.settings.VoiceHistoryPhrase,
             this.settings.VoiceShellCommands ?? new List<VoiceShellCommand>(),
@@ -277,21 +278,44 @@ public partial class App : System.Windows.Application
             changed = true;
         }
 
-        if (string.IsNullOrWhiteSpace(settings.VoiceStopPhrase))
+        if (string.IsNullOrWhiteSpace(settings.VoiceDictationPhrase))
         {
-            settings.VoiceStopPhrase = "potato farmer";
+            settings.VoiceDictationPhrase = AppSettings.DefaultVoiceDictationPhrase;
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.VoiceStopPhrase) ||
+            VoicePhrasesMatch(settings.VoiceStopPhrase, settings.VoiceDictationPhrase))
+        {
+            settings.VoiceStopPhrase = GetNonConflictingDefaultVoicePhrase(
+                AppSettings.DefaultVoiceStopPhrase,
+                settings.VoiceDictationPhrase);
             changed = true;
         }
 
         if (string.IsNullOrWhiteSpace(settings.VoiceHistoryPhrase) ||
-            string.Equals(settings.VoiceHistoryPhrase.Trim(), settings.VoiceStopPhrase.Trim(), StringComparison.OrdinalIgnoreCase))
+            VoicePhrasesMatch(settings.VoiceHistoryPhrase, settings.VoiceDictationPhrase) ||
+            VoicePhrasesMatch(settings.VoiceHistoryPhrase, settings.VoiceStopPhrase))
         {
-            settings.VoiceHistoryPhrase = "show me the money";
+            settings.VoiceHistoryPhrase = GetNonConflictingDefaultVoicePhrase(
+                AppSettings.DefaultVoiceHistoryPhrase,
+                settings.VoiceDictationPhrase,
+                settings.VoiceStopPhrase);
             changed = true;
         }
 
         return changed;
     }
+
+    private static bool VoicePhrasesMatch(string? left, string? right) =>
+        !string.IsNullOrWhiteSpace(left) &&
+        !string.IsNullOrWhiteSpace(right) &&
+        string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static string GetNonConflictingDefaultVoicePhrase(string defaultPhrase, params string?[] existingPhrases) =>
+        existingPhrases.Any(existingPhrase => VoicePhrasesMatch(defaultPhrase, existingPhrase))
+            ? string.Empty
+            : defaultPhrase;
 
     private static bool AreSameGesture(HotkeyGesture left, HotkeyGesture right) =>
         left.KeyCode == right.KeyCode &&
@@ -684,6 +708,7 @@ public partial class App : System.Windows.Application
             newSettings.OllamaModel,
             newSettings.OllamaMode,
             newSettings.EnableVoiceCommands,
+            newSettings.VoiceDictationPhrase,
             newSettings.VoiceStopPhrase,
             newSettings.VoiceHistoryPhrase,
             newSettings.VoiceShellCommands ?? new List<VoiceShellCommand>(),

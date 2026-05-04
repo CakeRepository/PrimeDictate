@@ -105,6 +105,84 @@ function Get-InstallerPlatform {
     }
 }
 
+function Test-SelfContainedPublishOutput {
+    param([string] $PublishDir)
+
+    $requiredFiles = @(
+        "PrimeDictate.exe",
+        "PrimeDictate.dll",
+        "PrimeDictate.runtimeconfig.json",
+        "hostfxr.dll",
+        "hostpolicy.dll",
+        "coreclr.dll",
+        "System.Private.CoreLib.dll",
+        "PresentationFramework.dll",
+        "WindowsBase.dll"
+    )
+
+    foreach ($file in $requiredFiles) {
+        $path = Join-Path $PublishDir $file
+        if (-not (Test-Path $path)) {
+            throw "Publish output is missing required self-contained runtime file: $path"
+        }
+    }
+
+    $runtimeConfigPath = Join-Path $PublishDir "PrimeDictate.runtimeconfig.json"
+    $runtimeConfig = Get-Content -Raw $runtimeConfigPath
+    if ($runtimeConfig -notmatch '"includedFrameworks"') {
+        throw "Publish output is framework-dependent. Expected includedFrameworks in $runtimeConfigPath"
+    }
+}
+
+function Test-MsiContainsSelfContainedRuntime {
+    param([string] $MsiPath)
+
+    $requiredFiles = @(
+        "hostfxr.dll",
+        "hostpolicy.dll",
+        "coreclr.dll",
+        "System.Private.CoreLib.dll",
+        "PresentationFramework.dll",
+        "WindowsBase.dll"
+    )
+
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $null
+    $view = $null
+    try {
+        $database = $installer.OpenDatabase($MsiPath, 0)
+        $view = $database.OpenView('SELECT `FileName` FROM `File`')
+        $view.Execute()
+
+        $fileNames = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        while ($record = $view.Fetch()) {
+            $fileName = $record.StringData(1)
+            if ($fileName.Contains("|")) {
+                $fileName = $fileName.Split("|")[-1]
+            }
+
+            [void] $fileNames.Add($fileName)
+        }
+
+        foreach ($file in $requiredFiles) {
+            if (-not $fileNames.Contains($file)) {
+                throw "MSI payload is missing required self-contained runtime file: $file ($MsiPath)"
+            }
+        }
+    }
+    finally {
+        if ($view -ne $null) {
+            [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($view)
+        }
+
+        if ($database -ne $null) {
+            [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($database)
+        }
+
+        [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($installer)
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $onlineProj = Join-Path $repoRoot "installer\wix\online\PrimeDictate.Online.wixproj"
 $outDir = Join-Path $repoRoot "artifacts\installer"
@@ -146,6 +224,7 @@ if (-not $ChocolateyOnly) {
             throw "Publish output missing PrimeDictate.exe at $publishDir. Run without -SkipPublish."
         }
 
+        Test-SelfContainedPublishOutput -PublishDir $publishDir
         $publishDirFull = (Resolve-Path $publishDir).Path
 
         Write-Host "Building online MSI for $rid..."
@@ -165,6 +244,7 @@ if (-not $ChocolateyOnly) {
             throw "Expected built MSI not found: $builtOnlineMsi"
         }
 
+        Test-MsiContainsSelfContainedRuntime -MsiPath $builtOnlineMsi
         Copy-Item -Force $builtOnlineMsi $publishedOnlineMsi
     }
 }

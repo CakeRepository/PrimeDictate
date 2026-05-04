@@ -141,8 +141,9 @@ internal sealed class DictationController : IAsyncDisposable
     private bool sendEnterAfterCommit;
     private bool returnToStartTargetOnCommit;
     private bool enableVoiceCommands = true;
-    private string voiceStopPhrase = "potato farmer";
-    private string voiceHistoryPhrase = "show me the money";
+    private string voiceDictationPhrase = AppSettings.DefaultVoiceDictationPhrase;
+    private string voiceStopPhrase = AppSettings.DefaultVoiceStopPhrase;
+    private string voiceHistoryPhrase = AppSettings.DefaultVoiceHistoryPhrase;
     private List<VoiceShellCommand> voiceShellCommands = new();
 
     private CancellationTokenSource? livePreviewCts;
@@ -151,6 +152,7 @@ internal sealed class DictationController : IAsyncDisposable
     private ForegroundInputTarget? activeInputTarget;
     private int autoCommitRequested;
     private int emergencyStopRequested;
+    private int voiceCommitRequested;
     private int voiceStopRequested;
     private int voiceHistoryRequested;
     private bool enableOllamaPostProcessing;
@@ -188,8 +190,9 @@ internal sealed class DictationController : IAsyncDisposable
         string ollamaModel = "gemma:2b",
         OllamaMode ollamaMode = OllamaMode.Default,
         bool enableVoiceCommands = true,
-        string voiceStopPhrase = "potato farmer",
-        string voiceHistoryPhrase = "show me the money",
+        string voiceDictationPhrase = AppSettings.DefaultVoiceDictationPhrase,
+        string voiceStopPhrase = AppSettings.DefaultVoiceStopPhrase,
+        string voiceHistoryPhrase = AppSettings.DefaultVoiceHistoryPhrase,
         IReadOnlyList<VoiceShellCommand>? voiceShellCommands = null,
         IReadOnlyList<TranscriptReplacementRule>? transcriptReplacements = null)
     {
@@ -204,6 +207,7 @@ internal sealed class DictationController : IAsyncDisposable
         this.ollamaModel = ollamaModel;
         this.ollamaMode = ollamaMode;
         this.enableVoiceCommands = enableVoiceCommands;
+        this.voiceDictationPhrase = NormalizeVoiceCommandPhrase(voiceDictationPhrase);
         this.voiceStopPhrase = NormalizeVoiceCommandPhrase(voiceStopPhrase);
         this.voiceHistoryPhrase = NormalizeVoiceCommandPhrase(voiceHistoryPhrase);
         this.ReplaceVoiceShellCommands(voiceShellCommands);
@@ -243,6 +247,7 @@ internal sealed class DictationController : IAsyncDisposable
         string ollamaModel,
         OllamaMode ollamaMode,
         bool enableVoiceCommands,
+        string voiceDictationPhrase,
         string voiceStopPhrase,
         string voiceHistoryPhrase,
         IReadOnlyList<VoiceShellCommand>? voiceShellCommands = null,
@@ -261,6 +266,7 @@ internal sealed class DictationController : IAsyncDisposable
             this.ollamaModel = ollamaModel;
             this.ollamaMode = ollamaMode;
             this.enableVoiceCommands = enableVoiceCommands;
+            this.voiceDictationPhrase = NormalizeVoiceCommandPhrase(voiceDictationPhrase);
             this.voiceStopPhrase = NormalizeVoiceCommandPhrase(voiceStopPhrase);
             this.voiceHistoryPhrase = NormalizeVoiceCommandPhrase(voiceHistoryPhrase);
             this.ReplaceVoiceShellCommands(voiceShellCommands);
@@ -297,6 +303,7 @@ internal sealed class DictationController : IAsyncDisposable
                 this.activeInputTarget = ForegroundInputTarget.Capture();
                 Interlocked.Exchange(ref this.autoCommitRequested, 0);
                 Interlocked.Exchange(ref this.emergencyStopRequested, 0);
+                Interlocked.Exchange(ref this.voiceCommitRequested, 0);
                 Interlocked.Exchange(ref this.voiceStopRequested, 0);
                 Interlocked.Exchange(ref this.voiceHistoryRequested, 0);
                 Interlocked.Exchange(ref this.lastSpeechTicksUtc, 0);
@@ -390,6 +397,7 @@ internal sealed class DictationController : IAsyncDisposable
                         var commandMatch = VoiceCommandMatcher.Apply(transcript, this.GetVoiceCommandOptionsSnapshot());
                         if (this.activeThreadId is Guid threadId &&
                             (!string.IsNullOrWhiteSpace(commandMatch.CleanedText) ||
+                                commandMatch.CommitRequested ||
                                 commandMatch.StopRequested ||
                                 commandMatch.HistoryRequested))
                         {
@@ -405,6 +413,13 @@ internal sealed class DictationController : IAsyncDisposable
                         if (commandMatch.StopRequested)
                         {
                             this.RequestStopFromVoiceCommand();
+                        }
+
+                        if (commandMatch.CommitRequested &&
+                            !commandMatch.StopRequested &&
+                            !commandMatch.HistoryRequested)
+                        {
+                            this.RequestCommitFromVoiceCommand();
                         }
                     }
                     catch (OperationCanceledException)
@@ -459,6 +474,38 @@ internal sealed class DictationController : IAsyncDisposable
             catch (Exception ex)
             {
                 AppLog.Error($"Silence auto-commit failed: {ex.Message}", this.activeThreadId);
+            }
+        });
+    }
+
+    private void RequestCommitFromVoiceCommand()
+    {
+        if (Interlocked.Exchange(ref this.voiceCommitRequested, 1) == 1)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            await this.toggleGate.WaitAsync().ConfigureAwait(false);
+
+            try
+            {
+                if (!this.recorder.IsRecording || this.IsEmergencyStopRequested())
+                {
+                    return;
+                }
+
+                AppLog.Info("Voice start / stop command detected.", this.activeThreadId);
+                await this.StopAndCommitRecordingCoreAsync("voice start / stop command").ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error($"Voice start / stop command failed: {ex.Message}", this.activeThreadId);
+            }
+            finally
+            {
+                this.toggleGate.Release();
             }
         });
     }
@@ -1104,6 +1151,7 @@ internal sealed class DictationController : IAsyncDisposable
         {
             return new VoiceCommandOptions(
                 this.enableVoiceCommands,
+                this.voiceDictationPhrase,
                 this.voiceStopPhrase,
                 this.voiceHistoryPhrase,
                 this.voiceShellCommands
