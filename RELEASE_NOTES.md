@@ -1,3 +1,11 @@
+# PrimeDictate 4.4.4
+
+## Highlights
+
+- Fixed update downloads so the temporary MSI file is closed before being moved into place on Windows.
+- Made update handoff files unique per attempt so stale PowerShell or Windows Installer processes cannot lock the next update attempt.
+- If an update install attempt fails, PrimeDictate clears the last-check timestamp so automatic update checks can retry after the next launch.
+
 # PrimeDictate 4.4.3
 
 ## Highlights

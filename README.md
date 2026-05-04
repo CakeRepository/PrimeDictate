@@ -265,7 +265,7 @@ PrimeDictate now runs as a **WPF tray app** (no console window in normal use):
 - **Runtime model switching**: Changing the selected backend or model causes the next transcription session to reload the correct engine automatically.
 - **Preview settings**: Setup window includes the overlay style, silence auto-commit delay, optional coding-mode Enter key, PrimeDictate audio cues, and mic capture behavior.
 - **Impact dashboard**: Settings includes a local stats tab with productivity cards, a 14-day words chart, and milestone achievements.
-- **Built-in update checks**: After first-run setup, PrimeDictate checks GitHub Releases at most once per day when automatic checks are enabled. The tray menu also has **Check for updates** for a manual check.
+- **Built-in update checks**: After first-run setup, PrimeDictate checks GitHub Releases at most once per day when automatic checks are enabled. Failed install attempts clear the check timestamp so the next launch can retry. The tray menu also has **Check for updates** for a manual check.
 - **Installer continuity**: The online MSI keeps one product identity for clean upgrades.
 - **Installer finish launch**: The online MSI exposes **“Launch PrimeDictate when setup completes”** (checked by default), which starts the app after install.
 - **Launch at login**: MSI installs add an all-users Windows Startup shortcut by default. Use `LAUNCHATLOGIN=0` for silent MSI installs or Chocolatey `/NoLaunchAtLogin` when you do not want PrimeDictate to start when users sign in. The Settings window can move startup to the current user’s Startup folder or disable it later.

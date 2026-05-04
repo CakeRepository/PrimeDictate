@@ -149,16 +149,33 @@ internal sealed class GitHubUpdateService : IDisposable
         Directory.CreateDirectory(updateDirectory);
 
         var installerPath = Path.Combine(updateDirectory, update.InstallerAssetName);
-        if (File.Exists(installerPath) &&
-            string.Equals(await ComputeSha256Async(installerPath, cancellationToken).ConfigureAwait(false), expectedHash, StringComparison.OrdinalIgnoreCase))
+        var useUniqueInstallerPath = false;
+        if (File.Exists(installerPath))
         {
-            var existingLength = new FileInfo(installerPath).Length;
-            progress?.Report(new UpdateDownloadProgress(existingLength, existingLength));
-            return installerPath;
+            try
+            {
+                if (string.Equals(await ComputeSha256Async(installerPath, cancellationToken).ConfigureAwait(false), expectedHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    var existingLength = new FileInfo(installerPath).Length;
+                    progress?.Report(new UpdateDownloadProgress(existingLength, existingLength));
+                    return installerPath;
+                }
+            }
+            catch (IOException ex)
+            {
+                useUniqueInstallerPath = true;
+                AppLog.Info($"Cached update installer is currently unavailable; downloading a fresh copy: {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                useUniqueInstallerPath = true;
+                AppLog.Info($"Cached update installer could not be read; downloading a fresh copy: {ex.Message}");
+            }
         }
 
-        var tempPath = $"{installerPath}.download";
-        File.Delete(tempPath);
+        var tempPath = Path.Combine(
+            updateDirectory,
+            $"{Path.GetFileNameWithoutExtension(update.InstallerAssetName)}.{Environment.ProcessId}.{Guid.NewGuid():N}.download");
 
         using var request = CreateGitHubRequest(update.InstallerDownloadUrl);
         using var response = await this.httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
@@ -166,38 +183,52 @@ internal sealed class GitHubUpdateService : IDisposable
         response.EnsureSuccessStatusCode();
 
         var totalBytes = response.Content.Headers.ContentLength ?? update.InstallerSizeBytes;
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using var output = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 128, useAsync: true);
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = new byte[1024 * 128];
-        long bytesReceived = 0;
-
-        while (true)
+        string actualHash;
+        await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
+        await using (var output = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 128, useAsync: true))
+        using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
         {
-            var bytesRead = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)
-                .ConfigureAwait(false);
-            if (bytesRead == 0)
+            var buffer = new byte[1024 * 128];
+            long bytesReceived = 0;
+
+            while (true)
             {
-                break;
+                var bytesRead = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)
+                    .ConfigureAwait(false);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                await output.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
+                hash.AppendData(buffer.AsSpan(0, bytesRead));
+                bytesReceived += bytesRead;
+                progress?.Report(new UpdateDownloadProgress(bytesReceived, totalBytes));
             }
 
-            await output.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
-            hash.AppendData(buffer.AsSpan(0, bytesRead));
-            bytesReceived += bytesRead;
-            progress?.Report(new UpdateDownloadProgress(bytesReceived, totalBytes));
+            await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+            actualHash = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
         }
 
-        await output.FlushAsync(cancellationToken).ConfigureAwait(false);
-        var actualHash = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
         if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
         {
-            File.Delete(tempPath);
+            TryDeleteFile(tempPath);
             throw new InvalidDataException(
                 $"Downloaded installer hash mismatch. Expected {expectedHash}, got {actualHash}.");
         }
 
-        File.Move(tempPath, installerPath, overwrite: true);
-        return installerPath;
+        var targetPath = useUniqueInstallerPath ? GetUniqueInstallerPath(updateDirectory, update.InstallerAssetName) : installerPath;
+        try
+        {
+            File.Move(tempPath, targetPath, overwrite: !useUniqueInstallerPath);
+        }
+        catch (IOException) when (!useUniqueInstallerPath)
+        {
+            targetPath = GetUniqueInstallerPath(updateDirectory, update.InstallerAssetName);
+            File.Move(tempPath, targetPath, overwrite: false);
+        }
+
+        return targetPath;
     }
 
     public static Process StartInstaller(string installerPath, AppSettings? settings)
@@ -211,7 +242,7 @@ internal sealed class GitHubUpdateService : IDisposable
             ? "LAUNCHATLOGIN=1"
             : "LAUNCHATLOGIN=0";
         var installerDirectory = Path.GetDirectoryName(installerPath) ?? Environment.CurrentDirectory;
-        var scriptPath = Path.Combine(installerDirectory, "PrimeDictate.StartUpdate.ps1");
+        var scriptPath = Path.Combine(installerDirectory, $"PrimeDictate.StartUpdate.{Environment.ProcessId}.{Guid.NewGuid():N}.ps1");
         File.WriteAllText(scriptPath, GetInstallerLaunchScript(), Encoding.UTF8);
         var arguments = string.Join(
             " ",
@@ -258,6 +289,25 @@ internal sealed class GitHubUpdateService : IDisposable
         } catch {
         }
         """;
+
+    private static string GetUniqueInstallerPath(string updateDirectory, string installerAssetName) =>
+        Path.Combine(
+            updateDirectory,
+            $"{Path.GetFileNameWithoutExtension(installerAssetName)}.{DateTime.UtcNow:yyyyMMddHHmmss}.{Guid.NewGuid():N}.msi");
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
 
     private async Task<string> DownloadExpectedSha256Async(AppUpdateInfo update, CancellationToken cancellationToken)
     {

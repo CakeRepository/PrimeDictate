@@ -597,7 +597,9 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
+            this.ClearLastUpdateCheckForRetry();
             AppLog.Error($"Update installation failed: {ex.Message}");
+            AppLog.Error(ex.ToString());
             System.Windows.MessageBox.Show(
                 $"The update could not be installed: {ex.Message}",
                 "Update failed",
@@ -612,6 +614,17 @@ public partial class App : System.Windows.Application
                 this.SetCheckForUpdatesMenuState("Check for updates", enabled: true);
             }
         }
+    }
+
+    private void ClearLastUpdateCheckForRetry()
+    {
+        if (this.settings is null || this.settingsStore is null)
+        {
+            return;
+        }
+
+        this.settings.LastUpdateCheckUtc = null;
+        this.settingsStore.Save(this.settings);
     }
 
     private void SetCheckForUpdatesMenuState(string text, bool enabled)
