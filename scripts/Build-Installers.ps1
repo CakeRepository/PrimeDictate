@@ -105,6 +105,50 @@ function Get-InstallerPlatform {
     }
 }
 
+function Assert-SelfContainedPublishOutput {
+    param(
+        [string] $PublishDir,
+        [string] $Rid
+    )
+
+    $exePath = Join-Path $PublishDir "PrimeDictate.exe"
+    $runtimeConfigPath = Join-Path $PublishDir "PrimeDictate.runtimeconfig.json"
+
+    if (-not (Test-Path $exePath)) {
+        throw "Publish output missing PrimeDictate.exe at $PublishDir. Run without -SkipPublish."
+    }
+
+    if (-not (Test-Path $runtimeConfigPath)) {
+        throw "Publish output missing PrimeDictate.runtimeconfig.json at $PublishDir."
+    }
+
+    $runtimeConfigRaw = Get-Content -Path $runtimeConfigPath -Raw
+    try {
+        $runtimeConfig = $runtimeConfigRaw | ConvertFrom-Json
+    }
+    catch {
+        throw "Could not parse runtimeconfig at $runtimeConfigPath."
+    }
+
+    $includedFrameworks = @($runtimeConfig.runtimeOptions.includedFrameworks)
+    if ($includedFrameworks.Count -eq 0) {
+        throw "Publish output for $Rid is framework-dependent (includedFrameworks missing). Use self-contained publish."
+    }
+
+    $frameworkNames = @($includedFrameworks | ForEach-Object { $_.name })
+    if ($frameworkNames -notcontains "Microsoft.NETCore.App" -or $frameworkNames -notcontains "Microsoft.WindowsDesktop.App") {
+        throw "Publish output for $Rid is missing required self-contained frameworks (Microsoft.NETCore.App and Microsoft.WindowsDesktop.App)."
+    }
+
+    $requiredHostFiles = @("hostfxr.dll", "hostpolicy.dll", "coreclr.dll")
+    foreach ($requiredFile in $requiredHostFiles) {
+        $requiredPath = Join-Path $PublishDir $requiredFile
+        if (-not (Test-Path $requiredPath)) {
+            throw "Publish output for $Rid is not self-contained. Missing $requiredFile in $PublishDir."
+        }
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $onlineProj = Join-Path $repoRoot "installer\wix\online\PrimeDictate.Online.wixproj"
 $outDir = Join-Path $repoRoot "artifacts\installer"
@@ -142,9 +186,7 @@ if (-not $ChocolateyOnly) {
                 -InformationalVersion $InformationalVersion
         }
 
-        if (-not (Test-Path (Join-Path $publishDir "PrimeDictate.exe"))) {
-            throw "Publish output missing PrimeDictate.exe at $publishDir. Run without -SkipPublish."
-        }
+        Assert-SelfContainedPublishOutput -PublishDir $publishDir -Rid $rid
 
         $publishDirFull = (Resolve-Path $publishDir).Path
 
